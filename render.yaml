@@ -1,0 +1,31 @@
+# THRETHA COUTURE — Render Blueprint (free tier).
+# Deploy: Render Dashboard -> New -> Blueprint -> connect this repo.
+# Images are stored in Cloudinary and data in MongoDB Atlas, so NO persistent
+# disk is required and the free plan is sufficient.
+services:
+  - type: web
+    name: thretha-couture
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # ---- Database (MongoDB Atlas free M0) ----
+      - key: MONGO_URL
+        sync: false        # paste your Atlas connection string in the dashboard
+      - key: DB_NAME
+        value: thretha_couture
+      # ---- Admin auth ----
+      - key: JWT_SECRET
+        generateValue: true   # Render generates a strong secret
+      # ---- Cloudinary (free) ----
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      # ---- CORS: set to your final site URL (avoid * in production) ----
+      - key: CORS_ORIGINS
+        sync: false

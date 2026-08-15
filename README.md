@@ -101,14 +101,14 @@ See **`.env.example`** for the full documented list. Summary:
 
 ---
 
-## 5. File storage / product images
+## 5. File storage / product images (Cloudinary — free)
 
-Uploaded images/videos are stored on the **server's disk** in `MEDIA_DIR` and served at `/api/media/file/<name>`. This is provider-independent and requires no external account.
+Media is stored in **Cloudinary** when the three `CLOUDINARY_*` env vars are set (recommended for production — the Render free web service has an **ephemeral disk**, so images must live off-box). If those vars are empty (local dev), uploads fall back to the local `MEDIA_DIR` folder and are served at `/api/media/file/<name>`.
 
-**Important for deployment:** platforms with an *ephemeral* filesystem (e.g. Vercel serverless, Heroku) will **lose uploads on redeploy**. Two supported options:
+The storage logic is isolated in `lib/storage.js` (`saveUpload`, `serveMedia`); the admin UI and API don't change between modes.
 
-- **(Recommended, zero extra config) Host on a platform with a persistent disk** — e.g. **Render** (attach a Disk mounted at your `MEDIA_DIR`), **Railway** (volume), **Fly.io** (volume), or any **VPS**. This preserves the current behaviour exactly.
-- **(Optional) External object storage** — Cloudflare R2 / AWS S3 / Cloudinary. The upload logic is isolated in one place (`saveUpload()` and `serveMedia()` in `app/api/[[...path]]/route.js`). If you want this, provide your storage keys and it can be wired behind the same `/api/admin/media` endpoint without any UI change.
+- Cloudinary free plan: 25 monthly credits, ≤10 MB/image, ≤100 MB/video — plenty for a boutique catalogue.
+- Get keys: cloudinary.com → **Console → Settings → API Keys** → copy Cloud Name, API Key, API Secret.
 
 ---
 
@@ -138,26 +138,41 @@ Not applicable — this store deliberately has **no payment gateway**. Orders ar
 
 ---
 
-## 9. Deployment
+## 9. Zero-cost deployment (Render free + Atlas free + Cloudinary free)
 
-### Option A — Render (recommended, keeps disk-based media working)
-1. Create a **MongoDB Atlas** cluster (see §10) and copy its connection string.
-2. Push this repo to GitHub.
-3. On **Render → New → Web Service**, connect the repo.
-   - **Build command:** `yarn install && yarn build`
-   - **Start command:** `yarn start`
-   - **Environment:** add all vars from `.env.example` (set `MEDIA_DIR=/data/media`).
-4. **Render → Disks:** add a Disk mounted at `/data` so uploads/seed images persist.
-5. Deploy. Then run the seeder once (Render **Shell**): `node scripts/seed.mjs`.
+**Cost: ₹0.** No persistent disk, no paid services. Uses `Dockerfile` + `render.yaml` included in the repo.
 
-### Option B — Vercel (needs external storage for uploads)
-1. Import the repo on **Vercel** (it auto-detects Next.js).
-2. Add all env vars in Project Settings.
-3. Because Vercel's filesystem is ephemeral, configure external object storage for media (see §5) before relying on uploads; browsing/ordering work regardless.
-4. Deploy, then seed against your Atlas DB from your machine: `MONGO_URL=... DB_NAME=... node scripts/seed.mjs`.
+### Step 1 — MongoDB Atlas (free M0)
+1. Create a free cluster at <https://www.mongodb.com/atlas>.
+2. **Database Access** → add a user + password.
+3. **Network Access** → allow `0.0.0.0/0` (so Render can connect).
+4. **Connect → Drivers** → copy the connection string → this is your `MONGO_URL`. Use `DB_NAME=thretha_couture`.
 
-### Option C — VPS / Docker
-Run `yarn install && yarn build && yarn start` behind Nginx; point `MEDIA_DIR` at a real folder; use a process manager (pm2/systemd). MongoDB can be local or Atlas.
+### Step 2 — Cloudinary (free)
+Sign up at <https://cloudinary.com> → **Console → Settings → API Keys** → copy `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`.
+
+### Step 3 — Migrate your existing data + images (one-off)
+Run this **once** (locally or in the current workspace) with your new keys in `.env`:
+```bash
+# .env must contain the SOURCE MONGO_URL/DB_NAME (current data),
+# the CLOUDINARY_* keys, and TARGET_MONGO_URL/TARGET_DB_NAME (your Atlas).
+node scripts/migrate-media.mjs
+```
+This uploads all current images to Cloudinary, rewrites every image URL in the database, and copies all collections (products, categories, settings, orders, customers, admin user) into your Atlas cluster.
+
+> For a brand-new store with no existing data, skip migration and just run `node scripts/seed.mjs` against Atlas + Cloudinary instead.
+
+### Step 4 — Deploy to Render (free)
+1. Push the repo to GitHub (see §8).
+2. Render Dashboard → **New → Blueprint** → connect the repo. Render reads `render.yaml`.
+3. Fill the `sync:false` secrets in the dashboard: `MONGO_URL`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CORS_ORIGINS` (set to your Render URL, e.g. `https://thretha-couture.onrender.com`). `JWT_SECRET` is auto-generated.
+4. Deploy. Health check is `/api/health`.
+5. Visit `https://<your-service>.onrender.com` and log in to `/admin`.
+
+> **Free-tier note:** Render free web services sleep after ~15 min idle and take a few seconds to wake on the next request. This is normal and fine for a boutique launched via Instagram bio.
+
+### Alternative — Vercel (also free)
+Import the repo on Vercel, add the same env vars (Cloudinary handles images, Atlas handles data — no disk needed). Vercel doesn't use the Dockerfile; it builds Next.js natively.
 
 ---
 

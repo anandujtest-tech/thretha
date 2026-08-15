@@ -3,14 +3,12 @@ import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import fs from 'fs/promises'
-import path from 'path'
+import { saveUpload, serveMedia } from '@/lib/storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'thretha_dev_secret'
-const MEDIA_DIR = process.env.MEDIA_DIR || path.join(process.cwd(), '.media')
 
 // ---------- Mongo ----------
 let dbPromise
@@ -253,45 +251,6 @@ async function ensureSeed(database) {
     created_at: now,
     updated_at: now,
   })
-}
-
-// ---------- Media (local persistent storage) ----------
-const MIME = {
-  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-  '.webp': 'image/webp', '.avif': 'image/avif', '.gif': 'image/gif',
-  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
-}
-
-async function saveUpload(request) {
-  const form = await request.formData()
-  const file = form.get('file')
-  if (!file || typeof file === 'string') return { error: 'file is required', status: 400 }
-  const buf = Buffer.from(await file.arrayBuffer())
-  let ext = path.extname(file.name || '').toLowerCase()
-  if (!MIME[ext]) ext = (file.type || '').startsWith('video') ? '.mp4' : '.jpg'
-  await fs.mkdir(MEDIA_DIR, { recursive: true })
-  const name = `${uuidv4()}${ext}`
-  await fs.writeFile(path.join(MEDIA_DIR, name), buf)
-  const type = (file.type || MIME[ext] || '').startsWith('video') ? 'video' : 'image'
-  return { url: `/api/media/file/${name}`, type }
-}
-
-async function serveMedia(name) {
-  try {
-    const safe = path.basename(name)
-    const full = path.join(MEDIA_DIR, safe)
-    const data = await fs.readFile(full)
-    const ext = path.extname(safe).toLowerCase()
-    return new NextResponse(data, {
-      status: 200,
-      headers: {
-        'Content-Type': MIME[ext] || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=31536000, immutable',
-      },
-    })
-  } catch {
-    return json({ error: 'Not found' }, 404)
-  }
 }
 
 // ---------- Order number ----------
@@ -625,8 +584,11 @@ async function handleRoute(request, { params }) {
 
       // ---- Media upload (admin) ----
       if (route === '/admin/media' && method === 'POST') {
-        const res = await saveUpload(request)
-        if (res.error) return json({ error: res.error }, res.status || 400)
+        const form = await request.formData()
+        const file = form.get('file')
+        if (!file || typeof file === 'string') return json({ error: 'file is required' }, 400)
+        const folder = String(form.get('folder') || 'catalog')
+        const res = await saveUpload(file, folder)
         return json(res)
       }
     }
