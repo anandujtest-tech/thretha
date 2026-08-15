@@ -1,10 +1,9 @@
-# THRETHA COUTURE — production Dockerfile
-# Next.js standalone output
-# Designed for Render free Web Service
+# THRETHA COUTURE — Production Dockerfile
+# Next.js standalone + MongoDB Atlas + Cloudinary
 
-# --------------------------------------------------
+# ============================================
 # 1. Dependencies
-# --------------------------------------------------
+# ============================================
 FROM node:20-alpine AS deps
 
 WORKDIR /app
@@ -16,9 +15,9 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 
-# --------------------------------------------------
+# ============================================
 # 2. Build
-# --------------------------------------------------
+# ============================================
 FROM node:20-alpine AS builder
 
 WORKDIR /app
@@ -27,14 +26,18 @@ COPY --from=deps /app/node_modules ./node_modules
 
 COPY . .
 
+# Create public directory because the original
+# public folder is no longer in the repository.
+RUN mkdir -p public
+
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build
 
 
-# --------------------------------------------------
+# ============================================
 # 3. Production
-# --------------------------------------------------
+# ============================================
 FROM node:20-alpine AS runner
 
 WORKDIR /app
@@ -47,16 +50,14 @@ ENV HOSTNAME=0.0.0.0
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 nextjs
 
-# Next.js standalone server
+# Public directory
 COPY --from=builder /app/public ./public
 
-COPY --from=builder \
-    --chown=nextjs:nodejs \
-    /app/.next/standalone ./
+# Next.js standalone server
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 
-COPY --from=builder \
-    --chown=nextjs:nodejs \
-    /app/.next/static ./.next/static
+# Next.js static files
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
 
