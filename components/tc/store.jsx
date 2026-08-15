@@ -112,7 +112,7 @@ function Header({ navigate, settings, wishCount }) {
 
         <button onClick={() => navigate('/')} className="flex items-center gap-2">
           {settings?.logo_url
-            ? <img src={settings.logo_url} alt="logo" className="h-8 w-auto object-contain" />
+            ? <img src={settings.logo_url} alt="Thretha Couture" className="h-12 w-auto rounded-sm object-contain md:h-14" />
             : <span className="font-display text-2xl leading-none tracking-wide text-ink md:text-3xl">THRETHA<span className="block text-[10px] tracking-[0.4em] text-brown md:inline md:ml-2 md:text-sm">COUTURE</span></span>}
         </button>
 
@@ -141,7 +141,9 @@ function Footer({ navigate, settings }) {
     <footer className="mt-24 border-t border-ink/10 bg-cream/60">
       <div className="container grid gap-10 py-14 md:grid-cols-4">
         <div>
-          <h3 className="font-display text-3xl leading-none">THRETHA<br />COUTURE</h3>
+          {settings?.logo_url
+            ? <img src={settings.logo_url} alt="Thretha Couture" className="h-24 w-24 rounded-md object-contain" />
+            : <h3 className="font-display text-3xl leading-none">THRETHA<br />COUTURE</h3>}
           <p className="mt-4 max-w-xs text-sm text-brown">A little wardrobe of things worth wearing.</p>
         </div>
         <div>
