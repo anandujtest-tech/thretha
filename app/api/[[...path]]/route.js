@@ -10,7 +10,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'thretha_dev_secret'
-const MEDIA_DIR = '/app/.media'
+const MEDIA_DIR = process.env.MEDIA_DIR || path.join(process.cwd(), '.media')
 
 // ---------- Mongo ----------
 let dbPromise

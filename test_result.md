@@ -273,6 +273,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ PASSED - POST without token returns 401. POST with Bearer token uploads image and returns {url:'/api/media/file/...', type:'image'}. GET media file returns 200 with Content-Type: image/jpeg and proper cache headers."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ REGRESSION TEST PASSED - After MEDIA_DIR refactor (hardcoded '/app/.media' → env-driven process.env.MEDIA_DIR || cwd/.media): (1) GET /api/media/file/seed-01.jpg returns 200 with Content-Type: image/jpeg ✓ (2) POST /api/admin/media without token returns 401 ✓ (3) POST /api/admin/media with Bearer token uploads PNG and returns {url:'/api/media/file/...', type:'image'} ✓ (4) GET uploaded media file returns 200 with Content-Type: image/png ✓. All media functionality working correctly with env-driven path."
 
 frontend:
   - task: "Storefront + Admin (not yet tested)"
@@ -290,7 +293,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 1
+  test_sequence: 2
   run_ui: false
 
 test_plan:
@@ -302,5 +305,9 @@ test_plan:
 agent_communication:
     -agent: "main"
     -message: "Full THRETHA COUTURE backend implemented in single catch-all route.js with MongoDB (UUIDs), JWT admin auth (bcrypt), local persistent media storage, and auto-seed (10 products, 2 categories, admin user, settings). Please test ALL backend endpoints. Admin creds: admin@threthacouture.com / thretha@2026. For media upload test, POST multipart 'file' to /api/admin/media with Bearer token then GET the returned url. Verify order creation returns wa.me URL and no payment gateway involved. No external API keys needed."
+    -agent: "main"
+    -message: "EXPORT/SELF-HOST REFACTOR: Changed MEDIA_DIR from hardcoded '/app/.media' to env-driven (process.env.MEDIA_DIR || cwd/.media) in app/api/[[...path]]/route.js. No other backend logic changed. Please re-verify the core backend still works after this change: (1) POST /api/admin/media upload with Bearer token returns {url,type} and the returned /api/media/file/<name> serves 200 with correct content-type; (2) GET /api/media/file/seed-01.jpg serves 200 image/jpeg; (3) GET /api/products, GET /api/settings, GET /api/categories still 200; (4) admin login + a protected route still work. This is a regression check for the media-path refactor."
     -agent: "testing"
     -message: "✅ ALL BACKEND TESTS PASSED (13/13 test suites, 100% success rate). Comprehensive testing completed covering: health check, public settings (verified no password_hash/id leak), categories with counts, products with all 12 filters/sorts, product detail by slug, order creation with WhatsApp integration (TC-YYYY-000N format verified), admin login with JWT, auth protection (401 without token), admin CRUD for products/categories/orders/settings, and media upload/serve with proper content-types. No 500 errors encountered. All validation working correctly. Backend is production-ready."
+    -agent: "testing"
+    -message: "✅ REGRESSION TEST COMPLETE (5/5 test suites passed, 100% success). MEDIA_DIR refactor verified successfully. All requested scenarios tested: (1) Seed media file (GET /api/media/file/seed-01.jpg) → 200 with Content-Type: image/jpeg ✓ (2) Media upload auth (POST /api/admin/media without token → 401 ✓, with Bearer token → {url, type:'image'} ✓, GET uploaded file → 200 with correct content-type ✓) (3) Core endpoints (GET /api/products → 200 with 11 products ✓, GET /api/settings → 200 with whatsapp & hero.images ✓, GET /api/categories → 200 with 2 categories ✓) (4) Admin flow (POST /api/admin/login → token ✓, GET /api/admin/stats with token → 200 ✓) (5) Order creation (POST /api/orders → 200 with whatsapp.url starting with https://wa.me/ ✓). NO FAILURES. The env-driven MEDIA_DIR change (process.env.MEDIA_DIR || path.join(process.cwd(), '.media')) works perfectly. All media operations (seed images, uploads, serving) functioning correctly."
