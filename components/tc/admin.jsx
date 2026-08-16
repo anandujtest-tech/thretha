@@ -508,16 +508,42 @@ function Orders() {
 }
 
 /* --------- Settings --------- */
+/* --------- Settings --------- */
 function SettingsPage() {
   const token = auth.get()
   const [f, setF] = useState(null)
   const [saved, setSaved] = useState(false)
-  useEffect(() => { api('/admin/settings', { token }).then(setF) }, [])
+
+  useEffect(() => {
+    api('/admin/settings', { token }).then(setF)
+  }, [])
+
   if (!f) return <p className="text-brown">Loading…</p>
+
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
-  const setHero = (k, v) => setF((s) => ({ ...s, hero: { ...s.hero, [k]: v } }))
-  const setShip = (k, v) => setF((s) => ({ ...s, shipping: { ...s.shipping, [k]: v } }))
-  const save = async () => { await api('/admin/settings', { method: 'PUT', body: f, token }); setSaved(true); setTimeout(() => setSaved(false), 2000) }
+
+  const setHero = (k, v) =>
+    setF((s) => ({
+      ...s,
+      hero: { ...s.hero, [k]: v },
+    }))
+
+  const setShip = (k, v) =>
+    setF((s) => ({
+      ...s,
+      shipping: { ...s.shipping, [k]: v },
+    }))
+
+  const save = async () => {
+    await api('/admin/settings', {
+      method: 'PUT',
+      body: f,
+      token,
+    })
+
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
 
   const setV = (k) => (e) => set(k, e.target.value)
 
@@ -525,88 +551,409 @@ function SettingsPage() {
     <div className="max-w-3xl space-y-8">
       <h1 className="font-display text-4xl text-ink">Settings</h1>
 
+      {/* Business */}
       <section className="border border-ink/10 bg-cream p-5">
         <h2 className="mb-4 font-display text-2xl">Business</h2>
+
         <div className="grid grid-cols-2 gap-3">
-          <AField label="Brand Name" value={f.brand_name} onChange={setV('brand_name')} />
-          <AField label="Instagram URL" value={f.instagram} onChange={setV('instagram')} />
-          <AField label="WhatsApp Number (with country code)" value={f.whatsapp} onChange={setV('whatsapp')} />
-          <AField label="Phone" value={f.phone} onChange={setV('phone')} />
-          <AField label="Email" value={f.email} onChange={setV('email')} />
-          <AField label="Business Address" value={f.address} onChange={setV('address')} />
-          <div><Label className="text-xs text-ink/60">Low stock threshold</Label><Input type="number" value={f.low_stock_threshold ?? 3} onChange={(e) => set('low_stock_threshold', Number(e.target.value))} className="mt-1 rounded-none" /></div>
+          <AField
+            label="Brand Name"
+            value={f.brand_name}
+            onChange={setV('brand_name')}
+          />
+
+          <AField
+            label="Instagram URL"
+            value={f.instagram}
+            onChange={setV('instagram')}
+          />
+
+          <AField
+            label="WhatsApp Number (with country code)"
+            value={f.whatsapp}
+            onChange={setV('whatsapp')}
+          />
+
+          <AField
+            label="Phone"
+            value={f.phone}
+            onChange={setV('phone')}
+          />
+
+          <AField
+            label="Email"
+            value={f.email}
+            onChange={setV('email')}
+          />
+
+          <AField
+            label="Business Address"
+            value={f.address}
+            onChange={setV('address')}
+          />
+
+          <div>
+            <Label className="text-xs text-ink/60">
+              Low stock threshold
+            </Label>
+
+            <Input
+              type="number"
+              value={f.low_stock_threshold ?? 3}
+              onChange={(e) =>
+                set('low_stock_threshold', Number(e.target.value))
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
         </div>
+
         <div className="mt-4 flex items-center gap-3">
           <span className="text-xs text-ink/60">Logo</span>
-          {f.logo_url && <img src={f.logo_url} className="h-10 object-contain" />}
-          <Uploader token={token} label="Upload logo" onDone={(m) => set('logo_url', m.url)} />
-          {f.logo_url && <button onClick={() => set('logo_url', '')} className="text-xs text-destructive">Remove</button>}
+
+          {f.logo_url && (
+            <img
+              src={f.logo_url}
+              className="h-10 object-contain"
+            />
+          )}
+
+          <Uploader
+            token={token}
+            label="Upload logo"
+            onDone={(m) => set('logo_url', m.url)}
+          />
+
+          {f.logo_url && (
+            <button
+              onClick={() => set('logo_url', '')}
+              className="text-xs text-destructive"
+            >
+              Remove
+            </button>
+          )}
         </div>
       </section>
 
+      {/* Homepage Hero */}
       <section className="border border-ink/10 bg-cream p-5">
-        <h2 className="mb-4 font-display text-2xl">Homepage Hero</h2>
+        <h2 className="mb-4 font-display text-2xl">
+          Homepage Hero
+        </h2>
+
         <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2"><Label className="text-xs text-ink/60">Title</Label><Input value={f.hero?.title || ''} onChange={(e) => setHero('title', e.target.value)} className="mt-1 rounded-none" /></div>
-          <div className="col-span-2"><Label className="text-xs text-ink/60">Subtitle</Label><Input value={f.hero?.subtitle || ''} onChange={(e) => setHero('subtitle', e.target.value)} className="mt-1 rounded-none" /></div>
-          <div><Label className="text-xs text-ink/60">Annotation</Label><Input value={f.hero?.annotation || ''} onChange={(e) => setHero('annotation', e.target.value)} className="mt-1 rounded-none" /></div>
-          <div><Label className="text-xs text-ink/60">CTA text</Label><Input value={f.hero?.cta || ''} onChange={(e) => setHero('cta', e.target.value)} className="mt-1 rounded-none" /></div>
+          <div className="col-span-2">
+            <Label className="text-xs text-ink/60">
+              Title
+            </Label>
+
+            <Input
+              value={f.hero?.title || ''}
+              onChange={(e) =>
+                setHero('title', e.target.value)
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
+
+          <div className="col-span-2">
+            <Label className="text-xs text-ink/60">
+              Subtitle
+            </Label>
+
+            <Input
+              value={f.hero?.subtitle || ''}
+              onChange={(e) =>
+                setHero('subtitle', e.target.value)
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-ink/60">
+              Annotation
+            </Label>
+
+            <Input
+              value={f.hero?.annotation || ''}
+              onChange={(e) =>
+                setHero('annotation', e.target.value)
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-ink/60">
+              CTA text
+            </Label>
+
+            <Input
+              value={f.hero?.cta || ''}
+              onChange={(e) =>
+                setHero('cta', e.target.value)
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
         </div>
+
         <div className="mt-4">
-          <div className="mb-2 flex items-center justify-between"><span className="text-xs text-ink/60">Hero images (carousel)</span><Uploader token={token} multiple label="Add image" onDone={(m) => setHero('images', [...(f.hero?.images || []), m.url])} /></div>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs text-ink/60">
+              Hero images (carousel)
+            </span>
+
+            <Uploader
+              token={token}
+              multiple
+              label="Add image"
+              onDone={(m) =>
+                setHero('images', [
+                  ...(f.hero?.images || []),
+                  m.url,
+                ])
+              }
+            />
+          </div>
+
           <div className="flex flex-wrap gap-2">
             {(f.hero?.images || []).map((src, i) => (
-              <div key={i} className="relative h-24 w-20 overflow-hidden border border-ink/15">
-                <img src={src} className="h-full w-full object-cover" />
-                <button onClick={() => setHero('images', f.hero.images.filter((_, x) => x !== i))} className="absolute right-0 top-0 bg-ink/70 p-0.5 text-cream"><X className="h-3 w-3" /></button>
+              <div
+                key={i}
+                className="relative h-24 w-20 overflow-hidden border border-ink/15"
+              >
+                <img
+                  src={src}
+                  className="h-full w-full object-cover"
+                />
+
+                <button
+                  onClick={() =>
+                    setHero(
+                      'images',
+                      f.hero.images.filter(
+                        (_, x) => x !== i
+                      )
+                    )
+                  }
+                  className="absolute right-0 top-0 bg-ink/70 p-0.5 text-cream"
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </div>
             ))}
           </div>
         </div>
       </section>
 
+      {/* Brand Story & Instagram */}
       <section className="border border-ink/10 bg-cream p-5">
-        <h2 className="mb-4 font-display text-2xl">Brand Story & Instagram</h2>
-        <Label className="text-xs text-ink/60">Brand story</Label>
-        <Textarea value={f.brand_story || ''} onChange={(e) => set('brand_story', e.target.value)} className="mt-1 rounded-none" />
+        <h2 className="mb-4 font-display text-2xl">
+          Brand Story & Instagram
+        </h2>
+
+        <Label className="text-xs text-ink/60">
+          Brand story
+        </Label>
+
+        <Textarea
+          value={f.brand_story || ''}
+          onChange={(e) =>
+            set('brand_story', e.target.value)
+          }
+          className="mt-1 rounded-none"
+        />
+
         <div className="mt-3 flex items-center gap-3">
-          <span className="text-xs text-ink/60">Story image</span>
-          {f.brand_story_image && <img src={f.brand_story_image} className="h-16 w-12 object-cover" />}
-          <Uploader token={token} label="Upload" onDone={(m) => set('brand_story_image', m.url)} />
+          <span className="text-xs text-ink/60">
+            Story image
+          </span>
+
+          {f.brand_story_image && (
+            <img
+              src={f.brand_story_image}
+              className="h-16 w-12 object-cover"
+            />
+          )}
+
+          <Uploader
+            token={token}
+            label="Upload"
+            onDone={(m) =>
+              set('brand_story_image', m.url)
+            }
+          />
         </div>
+
         <div className="mt-4">
-          <div className="mb-2 flex items-center justify-between"><span className="text-xs text-ink/60">Instagram gallery</span><Uploader token={token} multiple label="Add image" onDone={(m) => set('instagram_gallery', [...(f.instagram_gallery || []), m.url])} /></div>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs text-ink/60">
+              Instagram gallery
+            </span>
+
+            <Uploader
+              token={token}
+              multiple
+              label="Add image"
+              onDone={(m) =>
+                set('instagram_gallery', [
+                  ...(f.instagram_gallery || []),
+                  m.url,
+                ])
+              }
+            />
+          </div>
+
           <div className="flex flex-wrap gap-2">
             {(f.instagram_gallery || []).map((src, i) => (
-              <div key={i} className="relative h-20 w-20 overflow-hidden border border-ink/15">
-                <img src={src} className="h-full w-full object-cover" />
-                <button onClick={() => set('instagram_gallery', f.instagram_gallery.filter((_, x) => x !== i))} className="absolute right-0 top-0 bg-ink/70 p-0.5 text-cream"><X className="h-3 w-3" /></button>
+              <div
+                key={i}
+                className="relative h-20 w-20 overflow-hidden border border-ink/15"
+              >
+                <img
+                  src={src}
+                  className="h-full w-full object-cover"
+                />
+
+                <button
+                  onClick={() =>
+                    set(
+                      'instagram_gallery',
+                      f.instagram_gallery.filter(
+                        (_, x) => x !== i
+                      )
+                    )
+                  }
+                  className="absolute right-0 top-0 bg-ink/70 p-0.5 text-cream"
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </div>
             ))}
           </div>
         </div>
       </section>
 
+      {/* Shipping */}
       <section className="border border-ink/10 bg-cream p-5">
-        <h2 className="mb-4 font-display text-2xl">Shipping</h2>
+        <h2 className="mb-4 font-display text-2xl">
+          Shipping
+        </h2>
+
         <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2"><Label className="text-xs text-ink/60">Delivery timeframe</Label><Input value={f.shipping?.delivery_timeframe || ''} onChange={(e) => setShip('delivery_timeframe', e.target.value)} className="mt-1 rounded-none" /></div>
-          <div><Label className="text-xs text-ink/60">Delivery charges</Label><Input value={f.shipping?.delivery_charges || ''} onChange={(e) => setShip('delivery_charges', e.target.value)} className="mt-1 rounded-none" /></div>
-          <div><Label className="text-xs text-ink/60">Free shipping threshold</Label><Input type="number" value={f.shipping?.free_shipping_threshold || 0} onChange={(e) => setShip('free_shipping_threshold', Number(e.target.value))} className="mt-1 rounded-none" /></div>
-          <div><Label className="text-xs text-ink/60">Return policy</Label><Input value={f.shipping?.return_policy || ''} onChange={(e) => setShip('return_policy', e.target.value)} className="mt-1 rounded-none" /></div>
-          <div><Label className="text-xs text-ink/60">Exchange policy</Label><Input value={f.shipping?.exchange_policy || ''} onChange={(e) => setShip('exchange_policy', e.target.value)} className="mt-1 rounded-none" /></div>
+          <div className="col-span-2">
+            <Label className="text-xs text-ink/60">
+              Delivery timeframe
+            </Label>
+
+            <Input
+              value={f.shipping?.delivery_timeframe || ''}
+              onChange={(e) =>
+                setShip(
+                  'delivery_timeframe',
+                  e.target.value
+                )
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-ink/60">
+              Delivery charges
+            </Label>
+
+            <Input
+              value={f.shipping?.delivery_charges || ''}
+              onChange={(e) =>
+                setShip(
+                  'delivery_charges',
+                  e.target.value
+                )
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-ink/60">
+              Free shipping threshold
+            </Label>
+
+            <Input
+              type="number"
+              value={f.shipping?.free_shipping_threshold || 0}
+              onChange={(e) =>
+                setShip(
+                  'free_shipping_threshold',
+                  Number(e.target.value)
+                )
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-ink/60">
+              Return policy
+            </Label>
+
+            <Input
+              value={f.shipping?.return_policy || ''}
+              onChange={(e) =>
+                setShip(
+                  'return_policy',
+                  e.target.value
+                )
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-ink/60">
+              Exchange policy
+            </Label>
+
+            <Input
+              value={f.shipping?.exchange_policy || ''}
+              onChange={(e) =>
+                setShip(
+                  'exchange_policy',
+                  e.target.value
+                )
+              }
+              className="mt-1 rounded-none"
+            />
+          </div>
         </div>
       </section>
 
+      {/* Admin Security */}
+      <section className="border border-ink/10 bg-cream p-5">
+        <ChangePassword />
+      </section>
+
+      {/* Save Settings */}
       <div className="flex items-center gap-4">
-        <Button onClick={save} className="rounded-none bg-ink px-10 py-6 text-xs uppercase tracking-widest text-cream">Save Settings</Button>
-        {saved && <span className="text-sm text-green-700">Saved ✓</span>}
+        <Button
+          onClick={save}
+          className="rounded-none bg-ink px-10 py-6 text-xs uppercase tracking-widest text-cream"
+        >
+          Save Settings
+        </Button>
+
+        {saved && (
+          <span className="text-sm text-green-700">
+            Saved ✓
+          </span>
+        )}
       </div>
     </div>
   )
-}
-
-/* --------- Admin shell --------- */
+}/* --------- Admin shell --------- */
 export default function Admin({ navigate }) {
   const [authed, setAuthed] = useState(false)
   const [checking, setChecking] = useState(true)
