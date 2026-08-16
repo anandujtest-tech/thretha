@@ -257,104 +257,617 @@ function Dashboard() {
 /* --------- Product editor --------- */
 function ProductEditor({ token, product, categories, onClose, onSaved }) {
   const [f, setF] = useState(() => product || {
-    name: '', sku: '', category_id: categories[0]?.id || '', description: '',
-    price: '', discount_price: '', fabric: '', colour: '', material: '', pattern: '', care_instructions: '',
-    stock: 0, sizes: [], media: [], featured: false, new_arrival: false, best_seller: false, active: true,
+    name: '',
+    sku: '',
+    category_id: categories[0]?.id || '',
+    description: '',
+    price: '',
+    discount_price: '',
+    fabric: '',
+    colour: '',
+    material: '',
+    pattern: '',
+    care_instructions: '',
+    stock: 0,
+    sizes: [],
+    media: [],
+    featured: false,
+    new_arrival: false,
+    best_seller: false,
+    active: true,
   })
-  const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
+
   const [busy, setBusy] = useState(false)
+
+  const set = (k, v) => {
+    setF((s) => ({ ...s, [k]: v }))
+  }
 
   const toggleSize = (size) => {
     const exists = (f.sizes || []).find((s) => s.size === size)
-    if (exists) set('sizes', f.sizes.filter((s) => s.size !== size))
-    else set('sizes', [...(f.sizes || []), { size, available: true, stock: 1 }])
+
+    if (exists) {
+      set(
+        'sizes',
+        f.sizes.filter((s) => s.size !== size)
+      )
+    } else {
+      set(
+        'sizes',
+        [
+          ...(f.sizes || []),
+          {
+            size,
+            available: true,
+            stock: 1,
+          },
+        ]
+      )
+    }
   }
-  const addMedia = (m) => set('media', [...(f.media || []), { ...m, id: crypto.randomUUID(), is_primary: (f.media || []).length === 0, display_order: (f.media || []).length }])
-  const removeMedia = (id) => set('media', f.media.filter((m) => m.id !== id))
-  const makePrimary = (id) => set('media', f.media.map((m) => ({ ...m, is_primary: m.id === id })))
+
+  const addMedia = (m) => {
+    set('media', [
+      ...(f.media || []),
+      {
+        ...m,
+        id: crypto.randomUUID(),
+        is_primary: (f.media || []).length === 0,
+        display_order: (f.media || []).length,
+      },
+    ])
+  }
+
+  const removeMedia = (id) => {
+    set(
+      'media',
+      f.media.filter((m) => m.id !== id)
+    )
+  }
+
+  const makePrimary = (id) => {
+    set(
+      'media',
+      f.media.map((m) => ({
+        ...m,
+        is_primary: m.id === id,
+      }))
+    )
+  }
 
   const save = async () => {
     setBusy(true)
+
     try {
-      if (product?.id) await api(`/admin/products/${product.id}`, { method: 'PUT', body: f, token })
-      else await api('/admin/products', { method: 'POST', body: f, token })
+      if (product?.id) {
+        await api(`/admin/products/${product.id}`, {
+          method: 'PUT',
+          body: f,
+          token,
+        })
+      } else {
+        await api('/admin/products', {
+          method: 'POST',
+          body: f,
+          token,
+        })
+      }
+
       onSaved()
-    } catch (e) { alert(e.message) } finally { setBusy(false) }
+    } catch (e) {
+      alert(e.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const setV = (k) => (e) => set(k, e.target.value)
+  const setV = (k) => (e) => {
+    set(k, e.target.value)
+  }
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto bg-paper">
-        <DialogHeader><DialogTitle className="font-display text-3xl">{product?.id ? 'Edit Product' : 'Add Product'}</DialogTitle></DialogHeader>
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-2xl max-h-[92vh] overflow-y-auto bg-paper p-4 sm:p-6">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl sm:text-3xl">
+            {product?.id ? 'Edit Product' : 'Add Product'}
+          </DialogTitle>
+        </DialogHeader>
+
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <AField label="Product name" value={f.name} onChange={setV('name')} />
-            <AField label="Product code" value={f.sku} onChange={setV('sku')} placeholder="TC-SR-000" />
+
+          {/* Product name + code */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <AField
+              label="Product name"
+              value={f.name}
+              onChange={setV('name')}
+            />
+
+            <AField
+              label="Product code"
+              value={f.sku}
+              onChange={setV('sku')}
+              placeholder="TC-SR-000"
+            />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+
+          {/* Category + stock */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <Label className="text-xs text-ink/60">Category</Label>
-              <Select value={f.category_id || ''} onValueChange={(v) => set('category_id', v)}>
-                <SelectTrigger className="mt-1 rounded-none"><SelectValue placeholder="Select" /></SelectTrigger>
-                <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              <Label className="text-xs text-ink/60">
+                Category
+              </Label>
+
+              <Select
+                value={f.category_id || ''}
+                onValueChange={(v) => set('category_id', v)}
+              >
+                <SelectTrigger className="mt-1 w-full rounded-none">
+                  <SelectValue placeholder="Select" />
+                </SelectTrigger>
+
+                <SelectContent>
+                  {categories.map((c) => (
+                    <SelectItem
+                      key={c.id}
+                      value={c.id}
+                    >
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
-            <AField label="Stock quantity" value={f.stock} onChange={setV('stock')} type="number" />
+
+            <AField
+              label="Stock quantity"
+              value={f.stock}
+              onChange={setV('stock')}
+              type="number"
+            />
           </div>
-          <div><Label className="text-xs text-ink/60">Description</Label><Textarea value={f.description || ''} onChange={(e) => set('description', e.target.value)} className="mt-1 rounded-none" /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <AField label="Price" value={f.price} onChange={setV('price')} type="number" />
-            <AField label="Discount price (optional)" value={f.discount_price} onChange={setV('discount_price')} type="number" />
+
+          {/* Description */}
+          <div>
+            <Label className="text-xs text-ink/60">
+              Description
+            </Label>
+
+            <Textarea
+              value={f.description || ''}
+              onChange={(e) =>
+                set('description', e.target.value)
+              }
+              className="mt-1 min-h-24 w-full rounded-none"
+            />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <AField label="Fabric" value={f.fabric} onChange={setV('fabric')} />
-            <AField label="Colour" value={f.colour} onChange={setV('colour')} />
-            <AField label="Material" value={f.material} onChange={setV('material')} />
-            <AField label="Pattern" value={f.pattern} onChange={setV('pattern')} />
+
+          {/* Price + discount */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <AField
+              label="Price"
+              value={f.price}
+              onChange={setV('price')}
+              type="number"
+            />
+
+            <AField
+              label="Discount price (optional)"
+              value={f.discount_price}
+              onChange={setV('discount_price')}
+              type="number"
+            />
           </div>
-          <div><Label className="text-xs text-ink/60">Care instructions</Label><Textarea value={f.care_instructions || ''} onChange={(e) => set('care_instructions', e.target.value)} className="mt-1 rounded-none" /></div>
+
+          {/* Product details */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <AField
+              label="Fabric"
+              value={f.fabric}
+              onChange={setV('fabric')}
+            />
+
+            <AField
+              label="Colour"
+              value={f.colour}
+              onChange={setV('colour')}
+            />
+
+            <AField
+              label="Material"
+              value={f.material}
+              onChange={setV('material')}
+            />
+
+            <AField
+              label="Pattern"
+              value={f.pattern}
+              onChange={setV('pattern')}
+            />
+          </div>
+
+          {/* Care instructions */}
+          <div>
+            <Label className="text-xs text-ink/60">
+              Care instructions
+            </Label>
+
+            <Textarea
+              value={f.care_instructions || ''}
+              onChange={(e) =>
+                set('care_instructions', e.target.value)
+              }
+              className="mt-1 min-h-24 w-full rounded-none"
+            />
+          </div>
 
           {/* Sizes */}
           <div>
-            <Label className="text-xs text-ink/60">Sizes</Label>
+            <Label className="text-xs text-ink/60">
+              Sizes
+            </Label>
+
             <div className="mt-2 flex flex-wrap gap-2">
               {ALL_SIZES.map((s) => (
-                <button key={s} type="button" onClick={() => toggleSize(s)}
-                  className={cn('border px-3 py-1.5 text-sm', (f.sizes || []).find((x) => x.size === s) ? 'border-ink bg-ink text-cream' : 'border-ink/30')}>{s}</button>
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => toggleSize(s)}
+                  className={cn(
+                    'border px-3 py-1.5 text-sm',
+                    (f.sizes || []).find(
+                      (x) => x.size === s
+                    )
+                      ? 'border-ink bg-ink text-cream'
+                      : 'border-ink/30'
+                  )}
+                >
+                  {s}
+                </button>
               ))}
             </div>
           </div>
 
           {/* Media */}
           <div>
-            <div className="mb-2 flex items-center justify-between">
-              <Label className="text-xs text-ink/60">Media (images / video)</Label>
-              <Uploader token={token} multiple label="Upload" onDone={addMedia} />
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <Label className="text-xs text-ink/60">
+                Media (images / video)
+              </Label>
+
+              <Uploader
+                token={token}
+                multiple
+                label="Upload"
+                onDone={addMedia}
+              />
             </div>
+
+            <p className="mb-3 text-xs text-ink/50">
+              You can upload product images and videos.
+            </p>
+
             <div className="flex flex-wrap gap-3">
               {(f.media || []).map((m) => (
-                <div key={m.id} className="relative h-24 w-20 overflow-hidden border border-ink/15">
-                  {m.type === 'video' ? <video src={m.url} className="h-full w-full object-cover" /> : <img src={m.url} className="h-full w-full object-cover" />}
-                  <button onClick={() => removeMedia(m.id)} className="absolute right-0 top-0 bg-ink/70 p-0.5 text-cream"><X className="h-3 w-3" /></button>
-                  <button onClick={() => makePrimary(m.id)} className={cn('absolute bottom-0 left-0 bg-ink/70 p-0.5', m.is_primary ? 'text-rose' : 'text-cream')}><Star className="h-3 w-3" /></button>
+                <div
+                  key={m.id}
+                  className="relative h-24 w-20 shrink-0 overflow-hidden border border-ink/15"
+                >
+                  {m.type === 'video' ? (
+                    <video
+                      src={m.url}
+                      className="h-full w-full object-cover"
+                      controls
+                      muted
+                    />
+                  ) : (
+                    <img
+                      src={m.url}
+                      className="h-full w-full object-cover"
+                      alt=""
+                    />
+                  )}
+
+                  {/* Remove */}
+                  <button
+                    type="button"
+                    onClick={() => removeMedia(m.id)}
+                    className="absolute right-0 top-0 bg-ink/70 p-1 text-cream"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+
+                  {/* Primary */}
+                  <button
+                    type="button"
+                    onClick={() => makePrimary(m.id)}
+                    className={cn(
+                      'absolute bottom-0 left-0 bg-ink/70 p-1',
+                      m.is_primary
+                        ? 'text-rose'
+                        : 'text-cream'
+                    )}
+                    title={
+                      m.is_primary
+                        ? 'Primary media'
+                        : 'Make primary'
+                    }
+                  >
+                    <Star className="h-3 w-3" />
+                  </button>
                 </div>
               ))}
             </div>
           </div>
 
           {/* Visibility */}
-          <div className="flex flex-wrap gap-5">
-            {[['active', 'Active'], ['new_arrival', 'New Arrival'], ['featured', 'Featured'], ['best_seller', 'Best Seller']].map(([k, l]) => (
-              <label key={k} className="flex items-center gap-2 text-sm"><Checkbox checked={!!f[k]} onCheckedChange={(v) => set(k, !!v)} /> {l}</label>
+          <div className="flex flex-wrap gap-x-5 gap-y-3">
+            {[
+              ['active', 'Active'],
+              ['new_arrival', 'New Arrival'],
+              ['featured', 'Featured'],
+              ['best_seller', 'Best Seller'],
+            ].map(([k, l]) => (
+              <label
+                key={k}
+                className="flex items-center gap-2 text-sm"
+              >
+                <Checkbox
+                  checked={!!f[k]}
+                  onCheckedChange={(v) =>
+                    set(k, !!v)
+                  }
+                />
+
+                {l}
+              </label>
             ))}
           </div>
 
-          <Button onClick={save} disabled={busy} className="w-full rounded-none bg-ink py-6 text-xs uppercase tracking-widest text-cream">{busy ? 'Saving…' : 'Save Product'}</Button>
+          {/* Save */}
+          <Button
+            onClick={save}
+            disabled={busy}
+            className="w-full rounded-none bg-ink py-6 text-xs uppercase tracking-widest text-cream"
+          >
+            {busy ? 'Saving…' : 'Save Product'}
+          </Button>
+
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+
+/* --------- Products --------- */
+function Products() {
+  const token = auth.get()
+
+  const [list, setList] = useState([])
+  const [cats, setCats] = useState([])
+  const [editing, setEditing] = useState(null)
+  const [q, setQ] = useState('')
+
+  const load = () =>
+    api('/admin/products', { token }).then(setList)
+
+  useEffect(() => {
+    load()
+    api('/admin/categories', { token }).then(setCats)
+  }, [])
+
+  const filtered = list.filter(
+    (p) =>
+      p.name
+        .toLowerCase()
+        .includes(q.toLowerCase()) ||
+      p.sku
+        ?.toLowerCase()
+        .includes(q.toLowerCase())
+  )
+
+  const del = async (id) => {
+    if (confirm('Delete this product?')) {
+      await api(`/admin/products/${id}`, {
+        method: 'DELETE',
+        token,
+      })
+
+      load()
+    }
+  }
+
+  const dup = async (id) => {
+    await api(`/admin/products/${id}/duplicate`, {
+      method: 'POST',
+      token,
+    })
+
+    load()
+  }
+
+  return (
+    <div className="min-w-0">
+
+      {/* Header */}
+      <div className="mb-4 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="font-display text-3xl text-ink sm:text-4xl">
+          Products
+        </h1>
+
+        <Button
+          onClick={() => setEditing({})}
+          className="w-full rounded-none bg-ink text-cream sm:w-auto"
+        >
+          <Plus className="mr-1 h-4 w-4" />
+          Add Product
+        </Button>
+      </div>
+
+      {/* Search */}
+      <Input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search products…"
+        className="mb-4 w-full max-w-xs rounded-none"
+      />
+
+      {/* Product table */}
+      <div className="w-full overflow-x-auto border border-ink/10 bg-cream">
+        <table className="min-w-[700px] w-full text-sm">
+          <thead className="bg-beige/50 text-left text-xs uppercase tracking-wider text-ink/60">
+            <tr>
+              {[
+                'Image',
+                'Product',
+                'Category',
+                'Price',
+                'Stock',
+                'Status',
+                '',
+              ].map((h) => (
+                <th
+                  key={h}
+                  className="whitespace-nowrap p-3"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {filtered.map((p) => (
+              <tr
+                key={p.id}
+                className="border-t border-ink/5"
+              >
+                {/* Image */}
+                <td className="p-3">
+                  {p.media?.[0]?.url ? (
+                    p.media?.[0]?.type === 'video' ? (
+                      <video
+                        src={p.media[0].url}
+                        className="h-12 w-10 object-cover"
+                        muted
+                      />
+                    ) : (
+                      <img
+                        src={p.media[0].url}
+                        className="h-12 w-10 object-cover"
+                        alt=""
+                      />
+                    )
+                  ) : (
+                    <div className="h-12 w-10 border border-ink/10" />
+                  )}
+                </td>
+
+                {/* Product */}
+                <td className="p-3">
+                  <div className="min-w-[140px]">
+                    {p.name}
+
+                    <div className="text-xs text-ink/40">
+                      {p.sku}
+                    </div>
+                  </div>
+                </td>
+
+                {/* Category */}
+                <td className="whitespace-nowrap p-3">
+                  {p.category_name}
+                </td>
+
+                {/* Price */}
+                <td className="whitespace-nowrap p-3">
+                  {inr(
+                    p.discount_price || p.price
+                  )}
+                </td>
+
+                {/* Stock */}
+                <td className="whitespace-nowrap p-3">
+                  {p.stock}
+                </td>
+
+                {/* Status */}
+                <td className="whitespace-nowrap p-3">
+                  {p.stock <= 0 ? (
+                    <span className="text-destructive">
+                      Sold Out
+                    </span>
+                  ) : p.active ? (
+                    'Active'
+                  ) : (
+                    'Draft'
+                  )}
+                </td>
+
+                {/* Actions */}
+                <td className="p-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setEditing(p)}
+                      className="whitespace-nowrap text-brown underline"
+                    >
+                      Edit
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => dup(p.id)}
+                      title="Duplicate"
+                      className="shrink-0"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => del(p.id)}
+                      title="Delete"
+                      className="shrink-0"
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+
+            {filtered.length === 0 && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="p-8 text-center text-sm text-ink/50"
+                >
+                  No products found.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Editor */}
+      {editing && (
+        <ProductEditor
+          token={token}
+          product={editing.id ? editing : null}
+          categories={cats}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            load()
+          }}
+        />
+      )}
+
+    </div>
   )
 }
 
