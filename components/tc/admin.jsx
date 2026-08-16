@@ -870,59 +870,6 @@ function Products() {
     </div>
   )
 }
-
-/* --------- Products --------- */
-function Products() {
-  const token = auth.get()
-  const [list, setList] = useState([])
-  const [cats, setCats] = useState([])
-  const [editing, setEditing] = useState(null)
-  const [q, setQ] = useState('')
-  const load = () => api('/admin/products', { token }).then(setList)
-  useEffect(() => { load(); api('/admin/categories', { token }).then(setCats) }, [])
-  const filtered = list.filter((p) => p.name.toLowerCase().includes(q.toLowerCase()) || p.sku?.toLowerCase().includes(q.toLowerCase()))
-
-  const del = async (id) => { if (confirm('Delete this product?')) { await api(`/admin/products/${id}`, { method: 'DELETE', token }); load() } }
-  const dup = async (id) => { await api(`/admin/products/${id}/duplicate`, { method: 'POST', token }); load() }
-
-  return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="font-display text-4xl text-ink">Products</h1>
-        <Button onClick={() => setEditing({})} className="rounded-none bg-ink text-cream"><Plus className="mr-1 h-4 w-4" /> Add Product</Button>
-      </div>
-      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products…" className="mb-4 max-w-xs rounded-none" />
-      <div className="overflow-x-auto border border-ink/10 bg-cream">
-        <table className="w-full text-sm">
-          <thead className="bg-beige/50 text-left text-xs uppercase tracking-wider text-ink/60">
-            <tr>{['Image', 'Product', 'Category', 'Price', 'Stock', 'Status', ''].map((h) => <th key={h} className="p-3">{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {filtered.map((p) => (
-              <tr key={p.id} className="border-t border-ink/5">
-                <td className="p-3"><img src={p.media?.[0]?.url} className="h-12 w-10 object-cover" /></td>
-                <td className="p-3">{p.name}<div className="text-xs text-ink/40">{p.sku}</div></td>
-                <td className="p-3">{p.category_name}</td>
-                <td className="p-3">{inr(p.discount_price || p.price)}</td>
-                <td className="p-3">{p.stock}</td>
-                <td className="p-3">{p.stock <= 0 ? <span className="text-destructive">Sold Out</span> : p.active ? 'Active' : 'Draft'}</td>
-                <td className="p-3">
-                  <div className="flex gap-2">
-                    <button onClick={() => setEditing(p)} className="text-brown underline">Edit</button>
-                    <button onClick={() => dup(p.id)} title="Duplicate"><Copy className="h-4 w-4" /></button>
-                    <button onClick={() => del(p.id)} title="Delete"><Trash2 className="h-4 w-4 text-destructive" /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {editing && <ProductEditor token={token} product={editing.id ? editing : null} categories={cats} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />}
-    </div>
-  )
-}
-
 /* --------- Categories --------- */
 function Categories() {
   const token = auth.get()
