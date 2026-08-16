@@ -1507,7 +1507,7 @@ export default function Admin({ navigate }) {
         <button onClick={() => { auth.clear(); setAuthed(false) }} className="shrink-0 px-3 py-1.5 text-xs text-destructive">Exit</button>
       </div>
 
-      <main className="flex-1 p-6 pt-16 md:pt-6">
+      <main className="min-w-0 flex-1 p-3 pt-16 sm:p-6 md:pt-6">
         {tab === 'dashboard' && <Dashboard />}
         {tab === 'products' && <Products />}
         {tab === 'categories' && <Categories />}
