@@ -428,6 +428,44 @@ async function handleRoute(request, { params }) {
       if (!auth) return json({ error: 'Unauthorized' }, 401)
 
       if (route === '/admin/me' && method === 'GET') return json({ user: auth })
+      // ---- Change admin password ----
+      if (route === '/admin/change-password' && method === 'POST') {
+        const { currentPassword, newPassword } = await request.json()
+
+        if (!currentPassword || !newPassword) {
+          return json({ error: 'Current password and new password are required' }, 400)
+        }
+
+        if (newPassword.length < 8) {
+          return json({ error: 'New password must be at least 8 characters' }, 400)
+        }
+
+        const user = await database.collection('users').findOne({ id: auth.id })
+
+        if (!user) {
+          return json({ error: 'Admin user not found' }, 404)
+        }
+
+        const valid = await bcrypt.compare(currentPassword, user.password_hash)
+
+        if (!valid) {
+          return json({ error: 'Current password is incorrect' }, 401)
+        }
+
+        const password_hash = await bcrypt.hash(newPassword, 12)
+
+        await database.collection('users').updateOne(
+          { id: auth.id },
+          {
+            $set: {
+              password_hash,
+              updated_at: new Date(),
+            },
+          }
+        )
+
+        return json({ message: 'Password changed successfully' })
+      }
 
       if (route === '/admin/stats' && method === 'GET') {
         const [products, categories, orders, s] = await Promise.all([

@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { LayoutDashboard, Package, FolderTree, ShoppingBag, Settings as SettingsIcon, LogOut, Plus, Trash2, Copy, Upload, X, Star, Sparkles } from 'lucide-react'
+import { LayoutDashboard, Package, FolderTree, ShoppingBag, Settings as SettingsIcon,
+LogOut, Plus, Trash2, Copy, Upload, X, Star, Sparkles, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -71,13 +72,147 @@ function Login({ onLogin }) {
           <div><Label className="text-xs text-ink/60">Password</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 rounded-none" /></div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button disabled={busy} className="w-full rounded-none bg-ink py-6 text-xs uppercase tracking-[0.25em] text-cream">{busy ? 'Signing in…' : 'Sign In'}</Button>
-          <p className="text-center text-[11px] text-ink/40">admin@threthacouture.com · thretha@2026</p>
         </div>
       </form>
     </div>
   )
 }
+/* --------- Change Password --------- */
+function ChangePassword() {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
+  const submit = async (e) => {
+    e.preventDefault()
+    setMessage('')
+    setError('')
+
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError('New passwords do not match')
+      return
+    }
+
+    setBusy(true)
+
+    try {
+      await api('/admin/change-password', {
+        method: 'POST',
+        token: auth.get(),
+        body: {
+          currentPassword,
+          newPassword,
+        },
+      })
+
+      setMessage('Password changed successfully')
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="max-w-xl">
+      <div className="mb-6">
+        <div className="flex items-center gap-2">
+          <KeyRound className="h-5 w-5" />
+          <h2 className="font-display text-3xl text-ink">
+            Change Password
+          </h2>
+        </div>
+
+        <p className="mt-2 text-sm text-brown">
+          Update the password used to access the admin panel.
+        </p>
+      </div>
+
+      <form
+        onSubmit={submit}
+        className="space-y-5 border border-ink/10 bg-cream p-6 paper-card"
+      >
+        <div>
+          <Label className="text-xs text-ink/60">
+            Current Password
+          </Label>
+          <Input
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            className="mt-1 rounded-none"
+            autoComplete="current-password"
+            required
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-ink/60">
+            New Password
+          </Label>
+          <Input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="mt-1 rounded-none"
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
+          <p className="mt-1 text-xs text-brown">
+            Minimum 8 characters.
+          </p>
+        </div>
+
+        <div>
+          <Label className="text-xs text-ink/60">
+            Confirm New Password
+          </Label>
+          <Input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            className="mt-1 rounded-none"
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
+        </div>
+
+        {error && (
+          <p className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+
+        {message && (
+          <p className="text-sm text-green-700">
+            {message}
+          </p>
+        )}
+
+        <Button
+          type="submit"
+          disabled={busy}
+          className="rounded-none bg-ink text-cream"
+        >
+          {busy ? 'Changing…' : 'Change Password'}
+        </Button>
+      </form>
+    </div>
+  )
+}
 /* --------- Dashboard --------- */
 function Dashboard() {
   const token = auth.get()
