@@ -43,9 +43,12 @@ function ProductCard({ p, navigate, settings, rotate = 'rotate-0' }) {
   const [saved, setSaved] = useState(false)
   const [hover, setHover] = useState(false)
   useEffect(() => { setSaved(inWishlist(p.slug)) }, [p.slug])
-  const media = p.media || []
-  const primary = media.find((m) => m.is_primary) || media[0]
-  const secondary = media[1]
+ const media = p.media || []
+
+const images = media.filter((m) => m.type !== 'video')
+
+const primary = images.find((m) => m.is_primary) || images[0]
+const secondary = images.find((m) => m !== primary)
   const soldOut = p.stock <= 0
   const price = p.discount_price || p.price
   const threshold = settings?.low_stock_threshold ?? 3
