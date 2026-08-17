@@ -507,11 +507,40 @@ function ProductDetail({ navigate, settings, slug }) {
           </div>
           {media.length > 1 && (
             <div className="mt-3 flex gap-2 overflow-x-auto hide-scrollbar">
-              {media.map((m, idx) => (
-                <button key={m.id || idx} onClick={() => setActive(idx)} className={cn('h-20 w-16 shrink-0 overflow-hidden rounded-sm border-2', idx === active ? 'border-ink' : 'border-transparent')}>
-                  <img src={m.url} alt="thumb" className="h-full w-full object-cover" />
-                </button>
-              ))}
+            {media.map((m, idx) => (
+  <button
+    key={m.id || idx}
+    onClick={() => setActive(idx)}
+    className={cn(
+      'relative h-20 w-16 shrink-0 overflow-hidden rounded-sm border-2',
+      idx === active ? 'border-ink' : 'border-transparent'
+    )}
+  >
+    {m.type === 'video' ? (
+      <>
+        <video
+          src={m.url}
+          muted
+          playsInline
+          preload="metadata"
+          className="h-full w-full object-cover"
+        />
+
+        <span className="absolute inset-0 grid place-items-center bg-ink/20">
+          <span className="grid h-7 w-7 place-items-center rounded-full bg-cream/90 text-ink">
+            ▶
+          </span>
+        </span>
+      </>
+    ) : (
+      <img
+        src={m.url}
+        alt={p.name}
+        className="h-full w-full object-cover"
+      />
+    )}
+  </button>
+))}
             </div>
           )}
         </div>
