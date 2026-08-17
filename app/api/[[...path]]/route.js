@@ -346,7 +346,112 @@ async function handleRoute(request, { params }) {
         return json({ ok: false }, 500)
       }
     }
+        // ===== VISITOR ANALYTICS - ADMIN SUMMARY =====
+    if (route === '/admin/analytics' && method === 'GET') {
+      try {
+         const authUser = requireAuth(request)
 
+if (!authUser) {
+  return json({ error: 'Unauthorized' }, 401)
+}
+        const events = database.collection('visitor_events')
+        const now = new Date()
+
+        const startOfToday = new Date(now)
+        startOfToday.setHours(0, 0, 0, 0)
+
+        const startOfWeek = new Date(now)
+        startOfWeek.setDate(now.getDate() - now.getDay())
+        startOfWeek.setHours(0, 0, 0, 0)
+
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+
+        const totalVisitors = await events.distinct('visitor_id')
+
+        const todayVisitors = await events.distinct('visitor_id', {
+          created_at: { $gte: startOfToday }
+        })
+
+        const weekVisitors = await events.distinct('visitor_id', {
+          created_at: { $gte: startOfWeek }
+        })
+
+        const monthVisitors = await events.distinct('visitor_id', {
+          created_at: { $gte: startOfMonth }
+        })
+
+        const pageStats = await events.aggregate([
+          {
+            $group: {
+              _id: '$page',
+              views: { $sum: 1 }
+            }
+          },
+          { $sort: { views: -1 } },
+          { $limit: 10 }
+        ]).toArray()
+
+        const productStats = await events.aggregate([
+          {
+            $match: {
+              product_slug: { $ne: null }
+            }
+          },
+          {
+            $group: {
+              _id: '$product_slug',
+              views: { $sum: 1 }
+            }
+          },
+          { $sort: { views: -1 } },
+          { $limit: 10 }
+        ]).toArray()
+
+        const fiveMinutesAgo = new Date(
+          now.getTime() - 5 * 60 * 1000
+        )
+
+        const onlineVisitors = await events.distinct('visitor_id', {
+          last_seen: { $gte: fiveMinutesAgo }
+        })
+
+        const recentVisitors = await events.find({})
+          .sort({ created_at: -1 })
+          .limit(20)
+          .toArray()
+
+        return json({
+          total_visitors: totalVisitors.length,
+          today_visitors: todayVisitors.length,
+          week_visitors: weekVisitors.length,
+          month_visitors: monthVisitors.length,
+          currently_online: onlineVisitors.length,
+
+          pages: pageStats.map((item) => ({
+            page: item._id || '/',
+            views: item.views
+          })),
+
+          products: productStats.map((item) => ({
+            product_slug: item._id,
+            views: item.views
+          })),
+
+          recent_visitors: recentVisitors.map((item) => ({
+            visitor_id: item.visitor_id,
+            ip: item.ip,
+            page: item.page,
+            product_slug: item.product_slug,
+            user_agent: item.user_agent,
+            created_at: item.created_at,
+            last_seen: item.last_seen
+          }))
+        })
+      } catch (err) {
+        console.error('Visitor analytics summary error:', err)
+        return json({ error: 'Failed to load visitor analytics' }, 500)
+      }
+    }
     if (route === '/health' && method === 'GET') return json({ ok: true })
 
     // ===== PUBLIC SETTINGS =====

@@ -216,44 +216,282 @@ function ChangePassword() {
 /* --------- Dashboard --------- */
 function Dashboard() {
   const token = auth.get()
+
   const [s, setS] = useState(null)
-  useEffect(() => { api('/admin/stats', { token }).then(setS).catch(() => {}) }, [])
-  if (!s) return <p className="text-brown">Loading…</p>
-  const cards = [['Products', s.products], ['Categories', s.categories], ['Orders', s.orders], ['Low Stock', s.low_stock_count]]
+  const [analytics, setAnalytics] = useState(null)
+
+  useEffect(() => {
+    Promise.all([
+      api('/admin/stats', { token }),
+      api('/admin/analytics', { token }),
+    ])
+      .then(([stats, visitorData]) => {
+        setS(stats)
+        setAnalytics(visitorData)
+      })
+      .catch((err) => {
+        console.error('Dashboard loading error:', err)
+      })
+  }, [])
+
+  if (!s || !analytics) {
+    return <p className="text-brown">Loading dashboard…</p>
+  }
+
+  const cards = [
+    ['Products', s.products],
+    ['Categories', s.categories],
+    ['Orders', s.orders],
+    ['Low Stock', s.low_stock_count],
+  ]
+
+  const visitorCards = [
+    ['Total Visitors', analytics.total_visitors],
+    ['Today', analytics.today_visitors],
+    ['This Week', analytics.week_visitors],
+    ['This Month', analytics.month_visitors],
+    ['Online Now', analytics.currently_online],
+  ]
+
   return (
     <div>
-      <h1 className="font-display text-4xl text-ink">Good morning ✦</h1>
+      <h1 className="font-display text-4xl text-ink">
+        Good morning ✦
+      </h1>
+
       <p className="text-brown">Thretha Couture</p>
+
+      {/* Store statistics */}
       <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
         {cards.map(([l, v]) => (
-          <div key={l} className="border border-ink/10 bg-cream p-5 paper-card">
-            <p className="text-3xl font-display text-ink">{v}</p>
-            <p className="text-xs uppercase tracking-widest text-ink/50">{l}</p>
+          <div
+            key={l}
+            className="border border-ink/10 bg-cream p-5 paper-card"
+          >
+            <p className="font-display text-3xl text-ink">
+              {v}
+            </p>
+
+            <p className="text-xs uppercase tracking-widest text-ink/50">
+              {l}
+            </p>
           </div>
         ))}
       </div>
+
+      {/* Visitor Analytics */}
+      <section className="mt-8">
+        <div className="mb-4">
+          <h2 className="font-display text-3xl text-ink">
+            Visitor Analytics
+          </h2>
+
+          <p className="text-sm text-brown">
+            Website traffic and visitor activity
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+          {visitorCards.map(([label, value]) => (
+            <div
+              key={label}
+              className="border border-ink/10 bg-cream p-5 paper-card"
+            >
+              <p className="font-display text-3xl text-ink">
+                {value ?? 0}
+              </p>
+
+              <p className="text-xs uppercase tracking-widest text-ink/50">
+                {label}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Visitor details */}
       <div className="mt-8 grid gap-6 md:grid-cols-2">
+
+        {/* Most visited pages */}
         <div className="border border-ink/10 bg-cream p-5">
-          <h2 className="mb-3 font-display text-2xl">Recent Orders</h2>
-          {s.recent_orders.length === 0 ? <p className="text-sm text-ink/50">No orders yet.</p> : s.recent_orders.map((o) => (
-            <div key={o.id} className="flex justify-between border-b border-ink/5 py-2 text-sm">
-              <span>{o.order_number} · {o.customer?.name}</span><span className="text-ink/60">{o.status}</span>
-            </div>
-          ))}
+          <h2 className="mb-4 font-display text-2xl">
+            Most Visited Pages
+          </h2>
+
+          {analytics.pages?.length === 0 ? (
+            <p className="text-sm text-ink/50">
+              No visitor data yet.
+            </p>
+          ) : (
+            analytics.pages?.map((page) => (
+              <div
+                key={page.page}
+                className="flex justify-between border-b border-ink/5 py-2 text-sm"
+              >
+                <span className="truncate pr-4">
+                  {page.page}
+                </span>
+
+                <span className="text-ink/60">
+                  {page.views} views
+                </span>
+              </div>
+            ))
+          )}
         </div>
+
+        {/* Most viewed products */}
         <div className="border border-ink/10 bg-cream p-5">
-          <h2 className="mb-3 font-display text-2xl">Low Stock</h2>
-          {s.low_stock.length === 0 ? <p className="text-sm text-ink/50">All good.</p> : s.low_stock.map((p) => (
-            <div key={p.id} className="flex justify-between border-b border-ink/5 py-2 text-sm">
-              <span>{p.name}</span><span className={cn(p.stock === 0 ? 'text-destructive' : 'text-rose')}>{p.stock} left</span>
-            </div>
-          ))}
+          <h2 className="mb-4 font-display text-2xl">
+            Most Viewed Products
+          </h2>
+
+          {analytics.products?.length === 0 ? (
+            <p className="text-sm text-ink/50">
+              No product views yet.
+            </p>
+          ) : (
+            analytics.products?.map((product) => (
+              <div
+                key={product.product_slug}
+                className="flex justify-between border-b border-ink/5 py-2 text-sm"
+              >
+                <span className="truncate pr-4">
+                  {product.product_slug}
+                </span>
+
+                <span className="text-ink/60">
+                  {product.views} views
+                </span>
+              </div>
+            ))
+          )}
         </div>
+      </div>
+
+      {/* Recent Visitors */}
+      <div className="mt-6 border border-ink/10 bg-cream p-5">
+        <h2 className="mb-4 font-display text-2xl">
+          Recent Visitors
+        </h2>
+
+        {analytics.recent_visitors?.length === 0 ? (
+          <p className="text-sm text-ink/50">
+            No visitors yet.
+          </p>
+        ) : (
+          <div className="w-full overflow-x-auto">
+            <table className="w-full min-w-[700px] text-sm">
+              <thead>
+                <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wider text-ink/50">
+                  <th className="p-2">Visitor</th>
+                  <th className="p-2">IP</th>
+                  <th className="p-2">Page</th>
+                  <th className="p-2">Product</th>
+                  <th className="p-2">Last Seen</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {analytics.recent_visitors.map((visitor, index) => (
+                  <tr
+                    key={`${visitor.visitor_id}-${index}`}
+                    className="border-b border-ink/5"
+                  >
+                    <td className="p-2">
+                      {visitor.visitor_id?.slice(0, 12)}…
+                    </td>
+
+                    <td className="p-2">
+                      {visitor.ip}
+                    </td>
+
+                    <td className="max-w-[180px] truncate p-2">
+                      {visitor.page}
+                    </td>
+
+                    <td className="max-w-[180px] truncate p-2">
+                      {visitor.product_slug || '—'}
+                    </td>
+
+                    <td className="whitespace-nowrap p-2 text-ink/60">
+                      {visitor.last_seen
+                        ? new Date(visitor.last_seen).toLocaleString()
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Existing order + stock sections */}
+      <div className="mt-8 grid gap-6 md:grid-cols-2">
+
+        <div className="border border-ink/10 bg-cream p-5">
+          <h2 className="mb-3 font-display text-2xl">
+            Recent Orders
+          </h2>
+
+          {s.recent_orders.length === 0 ? (
+            <p className="text-sm text-ink/50">
+              No orders yet.
+            </p>
+          ) : (
+            s.recent_orders.map((o) => (
+              <div
+                key={o.id}
+                className="flex justify-between border-b border-ink/5 py-2 text-sm"
+              >
+                <span>
+                  {o.order_number} · {o.customer?.name}
+                </span>
+
+                <span className="text-ink/60">
+                  {o.status}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="border border-ink/10 bg-cream p-5">
+          <h2 className="mb-3 font-display text-2xl">
+            Low Stock
+          </h2>
+
+          {s.low_stock.length === 0 ? (
+            <p className="text-sm text-ink/50">
+              All good.
+            </p>
+          ) : (
+            s.low_stock.map((p) => (
+              <div
+                key={p.id}
+                className="flex justify-between border-b border-ink/5 py-2 text-sm"
+              >
+                <span>{p.name}</span>
+
+                <span
+                  className={cn(
+                    p.stock === 0
+                      ? 'text-destructive'
+                      : 'text-rose'
+                  )}
+                >
+                  {p.stock} left
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+
       </div>
     </div>
   )
 }
-
 /* --------- Product editor --------- */
 function ProductEditor({ token, product, categories, onClose, onSaved }) {
   const [f, setF] = useState(() => product || {
