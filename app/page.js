@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Store from '@/components/tc/store'
 import Admin from '@/components/tc/admin'
+import VisitorTracker from '@/components/tc/VisitorTracker'
 
 function App() {
   const [path, setPath] = useState('/')
@@ -32,7 +33,13 @@ function App() {
   }
 
   if (path.startsWith('/admin')) return <Admin navigate={navigate} />
-  return <Store path={path} navigate={navigate} />
+
+return (
+  <>
+    <VisitorTracker />
+    <Store path={path} navigate={navigate} />
+  </>
+)
 }
 
 export default App

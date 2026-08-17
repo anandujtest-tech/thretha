@@ -304,6 +304,48 @@ async function handleRoute(request, { params }) {
     }
 
     const database = await connectToMongo()
+    // ===== VISITOR ANALYTICS =====
+    if (route === '/analytics/visit' && method === 'POST') {
+      try {
+        const body = await request.json().catch(() => ({}))
+
+        const visitorId = String(body.visitor_id || '').slice(0, 100)
+        const page = String(body.page || '/').slice(0, 500)
+        const productSlug = body.product_slug
+          ? String(body.product_slug).slice(0, 200)
+          : null
+
+        if (!visitorId) {
+          return json({ error: 'Visitor ID required' }, 400)
+        }
+
+        const ip =
+          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+          request.headers.get('x-real-ip') ||
+          'unknown'
+
+        const userAgent =
+          request.headers.get('user-agent') || 'unknown'
+
+        const now = new Date()
+
+        await database.collection('visitor_events').insertOne({
+          id: uuidv4(),
+          visitor_id: visitorId,
+          ip,
+          page,
+          product_slug: productSlug,
+          user_agent: userAgent,
+          created_at: now,
+          last_seen: now,
+        })
+
+        return json({ ok: true })
+      } catch (err) {
+        console.error('Visitor analytics error:', err)
+        return json({ ok: false }, 500)
+      }
+    }
 
     if (route === '/health' && method === 'GET') return json({ ok: true })
 
