@@ -304,7 +304,11 @@ function Home({ navigate, settings }) {
       {/* Saree edit */}
       <section className="container grid items-center gap-8 py-14 md:grid-cols-2">
         <div className="overflow-hidden rounded-sm bg-beige paper-card -rotate-1">
-          <img src={settings?.saree_edit_image} alt="The Saree Edit" className="aspect-[4/5] w-full object-cover" />
+          <img
+  src={settings?.saree_edit_image}
+  alt={settings?.saree_edit_alt || 'The Saree Edit'}
+  className="aspect-[4/5] w-full object-cover"
+/>
         </div>
         <div>
           <Annotation className="text-lg">the saree edit ✦</Annotation>
