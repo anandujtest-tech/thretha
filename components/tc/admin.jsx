@@ -1295,7 +1295,56 @@ function SettingsPage() {
           </div>
         </div>
       </section>
+{/* Saree Edit */}
+<section className="border border-ink/10 bg-cream p-5">
+  <h2 className="mb-4 font-display text-2xl">Saree Edit</h2>
 
+  <div className="grid gap-4 md:grid-cols-2">
+    <div>
+      <Label className="text-xs text-ink/60">
+        Image Alt Text
+      </Label>
+
+      <Input
+        value={f.saree_edit_alt || ''}
+        onChange={(e) => set('saree_edit_alt', e.target.value)}
+        placeholder="The Saree Edit"
+        className="mt-1 rounded-none"
+      />
+    </div>
+
+    <div>
+      <Label className="text-xs text-ink/60">
+        Image
+      </Label>
+
+      <div className="mt-1 flex items-center gap-3">
+        {f.saree_edit_image && (
+          <img
+            src={f.saree_edit_image}
+            alt={f.saree_edit_alt || 'The Saree Edit'}
+            className="h-24 w-20 object-cover border border-ink/10"
+          />
+        )}
+
+        <Uploader
+          token={token}
+          label="Upload image"
+          onDone={(m) => set('saree_edit_image', m.url)}
+        />
+
+        {f.saree_edit_image && (
+          <button
+            onClick={() => set('saree_edit_image', '')}
+            className="text-xs text-destructive"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+  </div>
+</section>
       {/* Shipping */}
       <section className="border border-ink/10 bg-cream p-5">
         <h2 className="mb-4 font-display text-2xl">
