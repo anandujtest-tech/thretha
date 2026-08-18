@@ -340,6 +340,7 @@ const locationPermission =
           return json({ error: 'Visitor ID required' }, 400)
         }
 
+
         const ip =
           request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
           request.headers.get('x-real-ip') ||
@@ -347,6 +348,9 @@ const locationPermission =
 
         const userAgent =
           request.headers.get('user-agent') || 'unknown'
+const deviceType = String(body.device_type || 'Unknown').slice(0, 50)
+const browser = String(body.browser || 'Unknown').slice(0, 50)
+const operatingSystem = String(body.operating_system || 'Unknown').slice(0, 50)
 
         const now = new Date()
 
@@ -357,22 +361,82 @@ await database.collection('visitor_events').insertOne({
   page,
   product_slug: productSlug,
   user_agent: userAgent,
-
+  device_type: deviceType,
+  browser,
+  operating_system: operatingSystem,
   latitude,
   longitude,
   location_accuracy: locationAccuracy,
   location_permission: locationPermission,
-
   created_at: now,
   last_seen: now,
 })
-
+await database.collection('visitor_sessions').updateOne(
+  { visitor_id: visitorId },
+  {
+    $set: {
+      ip,
+      page,
+      product_slug: productSlug,
+      user_agent: userAgent,
+      device_type: deviceType,
+      browser,
+      operating_system: operatingSystem,
+      latitude,
+      longitude,
+      location_accuracy: locationAccuracy,
+      location_permission: locationPermission,
+      last_seen: now,
+    },
+    $setOnInsert: {
+      id: uuidv4(),
+      visitor_id: visitorId,
+      first_seen: now,
+    },
+  },
+  { upsert: true }
+)
         return json({ ok: true })
       } catch (err) {
         console.error('Visitor analytics error:', err)
         return json({ ok: false }, 500)
       }
     }
+// ===== VISITOR HEARTBEAT =====
+if (route === '/analytics/heartbeat' && method === 'POST') {
+  try {
+    const body = await request.json().catch(() => ({}))
+
+    const visitorId = String(body.visitor_id || '').slice(0, 100)
+
+    if (!visitorId) {
+      return json({ error: 'Visitor ID required' }, 400)
+    }
+
+    const ip =
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      request.headers.get('x-real-ip') ||
+      'unknown'
+
+    const now = new Date()
+
+    await database.collection('visitor_sessions').updateOne(
+      { visitor_id: visitorId },
+      {
+        $set: {
+          ip,
+          page: String(body.page || '/').slice(0, 500),
+          last_seen: now,
+        },
+      }
+    )
+
+    return json({ ok: true })
+  } catch (err) {
+    console.error('Visitor heartbeat error:', err)
+    return json({ ok: false }, 500)
+  }
+}
         // ===== VISITOR ANALYTICS - ADMIN SUMMARY =====
     if (route === '/admin/analytics' && method === 'GET') {
       try {
@@ -434,18 +498,20 @@ if (!authUser) {
           { $limit: 10 }
         ]).toArray()
 
-        const fiveMinutesAgo = new Date(
-          now.getTime() - 5 * 60 * 1000
-        )
+       const sessions = database.collection('visitor_sessions')
 
-        const onlineVisitors = await events.distinct('visitor_id', {
-          last_seen: { $gte: fiveMinutesAgo }
-        })
+const twoMinutesAgo = new Date(
+  now.getTime() - 2 * 60 * 1000
+)
 
-        const recentVisitors = await events.find({})
-          .sort({ created_at: -1 })
-          .limit(20)
-          .toArray()
+const onlineVisitors = await sessions.distinct('visitor_id', {
+  last_seen: { $gte: twoMinutesAgo }
+})
+
+       const recentVisitors = await sessions.find({})
+  .sort({ last_seen: -1 })
+  .limit(20)
+  .toArray()
 
         return json({
           total_visitors: totalVisitors.length,
@@ -464,20 +530,30 @@ if (!authUser) {
             views: item.views
           })),
 
-          recent_visitors: recentVisitors.map((item) => ({
+       recent_visitors: recentVisitors.map((item) => ({
+  id: item.id,
   visitor_id: item.visitor_id,
   ip: item.ip,
+
   page: item.page,
   product_slug: item.product_slug,
+
   user_agent: item.user_agent,
+  device_type: item.device_type ?? 'Unknown',
+  browser: item.browser ?? 'Unknown',
+  operating_system: item.operating_system ?? 'Unknown',
 
   latitude: item.latitude ?? null,
   longitude: item.longitude ?? null,
   location_accuracy: item.location_accuracy ?? null,
   location_permission: item.location_permission ?? 'not_requested',
 
-  created_at: item.created_at,
-  last_seen: item.last_seen
+  first_seen: item.first_seen,
+  last_seen: item.last_seen,
+
+  online: item.last_seen
+    ? new Date(item.last_seen) >= twoMinutesAgo
+    : false
 }))
         })
       } catch (err) {
