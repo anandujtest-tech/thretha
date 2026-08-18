@@ -370,6 +370,7 @@ function Dashboard() {
       </div>
 
       {/* Recent Visitors */}
+      {/* Recent Visitors */}
       <div className="mt-6 border border-ink/10 bg-cream p-5">
         <h2 className="mb-4 font-display text-2xl">
           Recent Visitors
@@ -381,15 +382,19 @@ function Dashboard() {
           </p>
         ) : (
           <div className="w-full overflow-x-auto">
-            <table className="w-full min-w-[700px] text-sm">
+            <table className="w-full min-w-[1200px] text-sm">
               <thead>
                 <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wider text-ink/50">
-                  <th className="p-2">Visitor</th>
-<th className="p-2">IP</th>
-<th className="p-2">Location</th>
-<th className="p-2">Page</th>
-<th className="p-2">Product</th>
-<th className="p-2">Last Seen</th>
+                  <th className="p-2">Status</th>
+                  <th className="p-2">Visitor ID</th>
+                  <th className="p-2">IP</th>
+                  <th className="p-2">Device</th>
+                  <th className="p-2">Browser</th>
+                  <th className="p-2">OS</th>
+                  <th className="p-2">Location</th>
+                  <th className="p-2">Page</th>
+                  <th className="p-2">Product</th>
+                  <th className="p-2">Last Seen</th>
                 </tr>
               </thead>
 
@@ -399,59 +404,123 @@ function Dashboard() {
                     key={`${visitor.visitor_id}-${index}`}
                     className="border-b border-ink/5"
                   >
+                    {/* Status */}
                     <td className="p-2">
-                      <div className="max-w-[180px]">
-  <div className="font-medium">
-    Visitor
-  </div>
-  <div className="break-all text-xs text-ink/50">
-    {visitor.visitor_id || '—'}
-  </div>
-</div>
+                      <span
+                        className={cn(
+                          'inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium',
+                          visitor.online
+                            ? 'text-green-700'
+                            : 'text-ink/40'
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'h-2 w-2 rounded-full',
+                            visitor.online
+                              ? 'bg-green-500'
+                              : 'bg-ink/20'
+                          )}
+                        />
+
+                        {visitor.online ? 'Online' : 'Offline'}
+                      </span>
                     </td>
 
-                   <td className="p-2">
-  {visitor.latitude != null && visitor.longitude != null ? (
-    <div className="whitespace-nowrap">
-      <div>
-        📍 {Number(visitor.latitude).toFixed(4)},{' '}
-        {Number(visitor.longitude).toFixed(4)}
-      </div>
-
-      {visitor.location_accuracy != null && (
-        <div className="text-xs text-ink/50">
-          Accuracy: {Math.round(visitor.location_accuracy)} m
-        </div>
-      )}
-
-      <a
-        href={`https://www.google.com/maps?q=${visitor.latitude},${visitor.longitude}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mt-1 inline-block text-xs underline underline-offset-2"
-      >
-        View on Map
-      </a>
-    </div>
-  ) : (
-    <span className="text-ink/40">
-      {visitor.location_permission === 'denied_or_unavailable'
-        ? 'Not shared'
-        : 'Not available'}
-    </span>
-  )}
-</td>
-                    <td className="max-w-[180px] truncate p-2">
-                      {visitor.page}
+                    {/* Visitor ID */}
+                    <td className="p-2">
+                      <div className="max-w-[180px] break-all text-xs">
+                        {visitor.visitor_id || '—'}
+                      </div>
                     </td>
 
-                    <td className="max-w-[180px] truncate p-2">
-                      {visitor.product_slug || '—'}
+                    {/* IP */}
+                    <td className="p-2">
+                      {visitor.ip || '—'}
                     </td>
 
-                    <td className="whitespace-nowrap p-2 text-ink/60">
+                    {/* Device */}
+                    <td className="p-2">
+                      {visitor.device_type || 'Unknown'}
+                    </td>
+
+                    {/* Browser */}
+                    <td className="p-2">
+                      {visitor.browser || 'Unknown'}
+                    </td>
+
+                    {/* Operating System */}
+                    <td className="p-2">
+                      {visitor.operating_system || 'Unknown'}
+                    </td>
+
+                    {/* Location */}
+                    <td className="p-2">
+                      {visitor.latitude != null &&
+                      visitor.longitude != null ? (
+                        <div className="whitespace-nowrap">
+                          <div>
+                            📍{' '}
+                            {Number(visitor.latitude).toFixed(4)}
+                            {', '}
+                            {Number(visitor.longitude).toFixed(4)}
+                          </div>
+
+                          {visitor.location_accuracy != null && (
+                            <div className="text-xs text-ink/50">
+                              Accuracy:{' '}
+                              {Math.round(
+                                visitor.location_accuracy
+                              )}{' '}
+                              m
+                            </div>
+                          )}
+
+                          <a
+                            href={`https://www.google.com/maps?q=${visitor.latitude},${visitor.longitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1 inline-block text-xs text-brown underline underline-offset-2"
+                          >
+                            View on Map
+                          </a>
+                        </div>
+                      ) : (
+                        <span className="text-ink/40">
+                          {visitor.location_permission ===
+                          'denied_or_unavailable'
+                            ? 'Not shared'
+                            : 'Not available'}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Page */}
+                    <td className="p-2">
+                      <div
+                        className="max-w-[180px] truncate"
+                        title={visitor.page || ''}
+                      >
+                        {visitor.page || '—'}
+                      </div>
+                    </td>
+
+                    {/* Product */}
+                    <td className="p-2">
+                      <div
+                        className="max-w-[180px] truncate"
+                        title={visitor.product_slug || ''}
+                      >
+                        {visitor.product_slug || '—'}
+                      </div>
+                    </td>
+
+                    {/* Last Seen */}
+                    <td className="whitespace-nowrap p-2">
                       {visitor.last_seen
-                        ? new Date(visitor.last_seen).toLocaleString()
+                        ? new Date(
+                            visitor.last_seen
+                          ).toLocaleString()
                         : '—'}
                     </td>
                   </tr>
