@@ -91,7 +91,7 @@ function Header({ navigate, settings, wishCount }) {
   const [open, setOpen] = useState(false)
   const links = [
     ['Shop', '/shop'],
-    ['Collections', '/shop'],
+    ['Collections', '/collections'],
     ['New Arrivals', '/new-arrivals'],
     ['About', '/#about'],
   ]
@@ -351,7 +351,86 @@ function Home({ navigate, settings }) {
     </div>
   )
 }
+/* ---------------- Collections page ---------------- */
+function Collections({ navigate, settings }) {
+  const [categories, setCategories] = useState([])
+  const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    api('/categories')
+      .then((data) => setCategories(Array.isArray(data) ? data : []))
+      .catch(() => setCategories([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <main className="container py-14 md:py-20">
+      <div className="mb-10 md:mb-14">
+        <p className="mb-3 text-xs uppercase tracking-[0.25em] text-brown">
+          Thretha Couture
+        </p>
+
+        <h1 className="font-display text-5xl leading-none text-ink md:text-6xl">
+          Explore the Wardrobe
+        </h1>
+
+        <p className="mt-4 max-w-xl text-sm leading-6 text-brown md:text-base">
+          Discover thoughtfully chosen pieces for every mood, moment and
+          occasion.
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="py-20 text-center text-sm text-ink/50">
+          Loading collections…
+        </div>
+      ) : categories.length === 0 ? (
+        <div className="py-20 text-center">
+          <p className="font-display text-3xl text-ink">
+            No collections yet.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-5 md:grid-cols-2">
+          {categories.map((category) => {
+            const image =
+              category.image ||
+              category.image_url ||
+              '/api/media/file/seed-04.jpg'
+
+            return (
+              <button
+                key={category.id}
+                type="button"
+                onClick={() => navigate(`/category/${category.slug}`)}
+                className="group relative aspect-[4/3] overflow-hidden rounded-sm bg-cream text-left"
+              >
+                <img
+                  src={image}
+                  alt={category.name}
+                  className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+                />
+
+                <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
+
+                <div className="absolute inset-x-0 bottom-0 p-6 md:p-8">
+                  <h2 className="font-display text-3xl text-white md:text-4xl">
+                    {category.name}
+                  </h2>
+
+                  <div className="mt-2 flex items-center gap-2 text-sm text-white/90">
+                    <span>Explore the edit</span>
+                    <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </main>
+  )
+}
 /* ---------------- Product Grid page ---------------- */
 function ProductGrid({ navigate, settings, path }) {
   const isNew = path === '/new-arrivals'
@@ -721,10 +800,11 @@ export default function Store({ path, navigate }) {
   useEffect(() => { window.scrollTo(0, 0) }, [path])
 
   let view
-  if (path === '/' ) view = <Home navigate={navigate} settings={settings} />
-  else if (path === '/shop' || path.startsWith('/category/') || path === '/new-arrivals') view = <ProductGrid navigate={navigate} settings={settings} path={path} />
-  else if (path.startsWith('/product/')) view = <ProductDetail navigate={navigate} settings={settings} slug={path.split('/')[2]} />
-  else if (path === '/wishlist') view = <Wishlist navigate={navigate} settings={settings} />
+ if (path === '/') view = <Home navigate={navigate} settings={settings} />
+else if (path === '/collections') view = <Collections navigate={navigate} settings={settings} />
+else if (path === '/shop' || path.startsWith('/category/') || path === '/new-arrivals') view = <ProductGrid navigate={navigate} settings={settings} path={path} />
+else if (path.startsWith('/product/')) view = <ProductDetail navigate={navigate} settings={settings} slug={path.split('/')[2]} />
+else if (path === '/wishlist') view = <Wishlist navigate={navigate} settings={settings} />
   else view = (
     <div className="container py-24 text-center">
       <p className="font-display text-5xl text-ink">This page wandered off somewhere.</p>
