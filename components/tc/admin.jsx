@@ -400,13 +400,17 @@ function Dashboard() {
                     className="border-b border-ink/5"
                   >
                     <td className="p-2">
-                      {visitor.visitor_id?.slice(0, 12)}…
+                      <div className="max-w-[180px]">
+  <div className="font-medium">
+    Visitor
+  </div>
+  <div className="break-all text-xs text-ink/50">
+    {visitor.visitor_id || '—'}
+  </div>
+</div>
                     </td>
 
-                    <td className="p-2">
-                      {visitor.ip}
-                    </td>
-                     <td className="p-2">
+                   <td className="p-2">
   {visitor.latitude != null && visitor.longitude != null ? (
     <div className="whitespace-nowrap">
       <div>
@@ -419,6 +423,15 @@ function Dashboard() {
           Accuracy: {Math.round(visitor.location_accuracy)} m
         </div>
       )}
+
+      <a
+        href={`https://www.google.com/maps?q=${visitor.latitude},${visitor.longitude}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-1 inline-block text-xs underline underline-offset-2"
+      >
+        View on Map
+      </a>
     </div>
   ) : (
     <span className="text-ink/40">
