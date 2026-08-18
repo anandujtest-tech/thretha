@@ -385,10 +385,11 @@ function Dashboard() {
               <thead>
                 <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wider text-ink/50">
                   <th className="p-2">Visitor</th>
-                  <th className="p-2">IP</th>
-                  <th className="p-2">Page</th>
-                  <th className="p-2">Product</th>
-                  <th className="p-2">Last Seen</th>
+<th className="p-2">IP</th>
+<th className="p-2">Location</th>
+<th className="p-2">Page</th>
+<th className="p-2">Product</th>
+<th className="p-2">Last Seen</th>
                 </tr>
               </thead>
 
@@ -405,7 +406,28 @@ function Dashboard() {
                     <td className="p-2">
                       {visitor.ip}
                     </td>
+                     <td className="p-2">
+  {visitor.latitude != null && visitor.longitude != null ? (
+    <div className="whitespace-nowrap">
+      <div>
+        📍 {Number(visitor.latitude).toFixed(4)},{' '}
+        {Number(visitor.longitude).toFixed(4)}
+      </div>
 
+      {visitor.location_accuracy != null && (
+        <div className="text-xs text-ink/50">
+          Accuracy: {Math.round(visitor.location_accuracy)} m
+        </div>
+      )}
+    </div>
+  ) : (
+    <span className="text-ink/40">
+      {visitor.location_permission === 'denied_or_unavailable'
+        ? 'Not shared'
+        : 'Not available'}
+    </span>
+  )}
+</td>
                     <td className="max-w-[180px] truncate p-2">
                       {visitor.page}
                     </td>

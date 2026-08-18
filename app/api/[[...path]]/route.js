@@ -465,14 +465,20 @@ if (!authUser) {
           })),
 
           recent_visitors: recentVisitors.map((item) => ({
-            visitor_id: item.visitor_id,
-            ip: item.ip,
-            page: item.page,
-            product_slug: item.product_slug,
-            user_agent: item.user_agent,
-            created_at: item.created_at,
-            last_seen: item.last_seen
-          }))
+  visitor_id: item.visitor_id,
+  ip: item.ip,
+  page: item.page,
+  product_slug: item.product_slug,
+  user_agent: item.user_agent,
+
+  latitude: item.latitude ?? null,
+  longitude: item.longitude ?? null,
+  location_accuracy: item.location_accuracy ?? null,
+  location_permission: item.location_permission ?? 'not_requested',
+
+  created_at: item.created_at,
+  last_seen: item.last_seen
+}))
         })
       } catch (err) {
         console.error('Visitor analytics summary error:', err)
