@@ -1303,6 +1303,45 @@ function SettingsPage() {
               }
               className="mt-1 rounded-none"
             />
+<div className="mt-6 flex items-center justify-between border-t border-ink/10 pt-5">
+  <div>
+    <p className="text-sm font-medium text-ink">
+      Ask visitors for location
+    </p>
+
+    <p className="mt-1 max-w-xl text-xs text-ink/60">
+      Ask visitors for permission to share their device location.
+      When disabled, the website will not request location access.
+    </p>
+  </div>
+
+  <button
+    type="button"
+    onClick={() =>
+      set(
+        'ask_visitor_location',
+        !(f.ask_visitor_location ?? false)
+      )
+    }
+    className={cn(
+      'relative h-6 w-11 rounded-full transition-colors',
+      f.ask_visitor_location
+        ? 'bg-ink'
+        : 'bg-ink/20'
+    )}
+    aria-label="Ask visitors for location"
+    aria-pressed={!!f.ask_visitor_location}
+  >
+    <span
+      className={cn(
+        'absolute top-1 h-4 w-4 rounded-full bg-white transition-transform',
+        f.ask_visitor_location
+          ? 'translate-x-6'
+          : 'translate-x-1'
+      )}
+    />
+  </button>
+</div>
           </div>
         </div>
 

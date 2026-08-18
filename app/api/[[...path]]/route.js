@@ -314,7 +314,28 @@ async function handleRoute(request, { params }) {
         const productSlug = body.product_slug
           ? String(body.product_slug).slice(0, 200)
           : null
+          const latitude =
+  typeof body.latitude === 'number' && Number.isFinite(body.latitude)
+    ? body.latitude
+    : null
 
+const longitude =
+  typeof body.longitude === 'number' && Number.isFinite(body.longitude)
+    ? body.longitude
+    : null
+
+const locationAccuracy =
+  typeof body.location_accuracy === 'number' &&
+  Number.isFinite(body.location_accuracy)
+    ? body.location_accuracy
+    : null
+
+const locationPermission =
+  ['granted', 'denied_or_unavailable', 'not_requested'].includes(
+    body.location_permission
+  )
+    ? body.location_permission
+    : 'not_requested'
         if (!visitorId) {
           return json({ error: 'Visitor ID required' }, 400)
         }
@@ -329,16 +350,22 @@ async function handleRoute(request, { params }) {
 
         const now = new Date()
 
-        await database.collection('visitor_events').insertOne({
-          id: uuidv4(),
-          visitor_id: visitorId,
-          ip,
-          page,
-          product_slug: productSlug,
-          user_agent: userAgent,
-          created_at: now,
-          last_seen: now,
-        })
+await database.collection('visitor_events').insertOne({
+  id: uuidv4(),
+  visitor_id: visitorId,
+  ip,
+  page,
+  product_slug: productSlug,
+  user_agent: userAgent,
+
+  latitude,
+  longitude,
+  location_accuracy: locationAccuracy,
+  location_permission: locationPermission,
+
+  created_at: now,
+  last_seen: now,
+})
 
         return json({ ok: true })
       } catch (err) {
