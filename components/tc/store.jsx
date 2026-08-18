@@ -89,74 +89,137 @@ const secondary = images.find((m) => m !== primary)
 /* ---------------- Header ---------------- */
 function Header({ navigate, settings, wishCount, cartCount }) {
   const [open, setOpen] = useState(false)
+
   const links = [
     ['Shop', '/shop'],
     ['Collections', '/collections'],
     ['New Arrivals', '/new-arrivals'],
     ['About', '/#about'],
   ]
+
   return (
     <header className="sticky top-0 z-40 border-b border-ink/10 bg-paper/85 backdrop-blur-md">
       <div className="container flex items-center justify-between py-3">
+
+        {/* Mobile Menu */}
         <div className="flex items-center gap-3 md:hidden">
           <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger asChild><button aria-label="Menu"><Menu className="h-5 w-5" /></button></SheetTrigger>
+            <SheetTrigger asChild>
+              <button aria-label="Menu">
+                <Menu className="h-5 w-5" />
+              </button>
+            </SheetTrigger>
+
             <SheetContent side="left" className="bg-paper">
-              <SheetHeader><SheetTitle className="font-display text-2xl">Thretha Couture</SheetTitle></SheetHeader>
+              <SheetHeader>
+                <SheetTitle className="font-display text-2xl">
+                  Thretha Couture
+                </SheetTitle>
+              </SheetHeader>
+
               <nav className="mt-6 flex flex-col gap-4">
-                {links.map(([l, h]) => (
-                  <button key={l} className="text-left font-display text-2xl text-ink" onClick={() => { setOpen(false); navigate(h) }}>{l}</button>
+                {links.map(([label, href]) => (
+                  <button
+                    key={label}
+                    className="text-left font-display text-2xl text-ink"
+                    onClick={() => {
+                      setOpen(false)
+                      navigate(href)
+                    }}
+                  >
+                    {label}
+                  </button>
                 ))}
-                <a href={settings?.instagram} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-2 text-sm"><Instagram className="h-4 w-4" /> Instagram</a>
+
+                <a
+                  href={settings?.instagram}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 flex items-center gap-2 text-sm"
+                >
+                  <Instagram className="h-4 w-4" />
+                  Instagram
+                </a>
               </nav>
             </SheetContent>
           </Sheet>
         </div>
 
-        <button onClick={() => navigate('/')} className="flex items-center gap-2">
-          {settings?.logo_url
-            ? <img src={settings.logo_url} alt="Thretha Couture" className="h-12 w-auto rounded-sm object-contain md:h-14" />
-            : <span className="font-display text-2xl leading-none tracking-wide text-ink md:text-3xl">THRETHA<span className="block text-[10px] tracking-[0.4em] text-brown md:inline md:ml-2 md:text-sm">COUTURE</span></span>}
+        {/* Logo */}
+        <button
+          onClick={() => navigate('/')}
+          className="flex items-center gap-2"
+        >
+          {settings?.logo_url ? (
+            <img
+              src={settings.logo_url}
+              alt="Thretha Couture"
+              className="h-12 w-auto rounded-sm object-contain md:h-14"
+            />
+          ) : (
+            <span className="font-display text-2xl leading-none tracking-wide text-ink md:text-3xl">
+              THRETHA
+              <span className="block text-[10px] tracking-[0.4em] text-brown md:ml-2 md:inline md:text-sm">
+                COUTURE
+              </span>
+            </span>
+          )}
         </button>
 
+        {/* Desktop Navigation */}
         <nav className="hidden items-center gap-7 md:flex">
-          {links.slice(0, 3).map(([l, h]) => (
-            <button key={l} onClick={() => navigate(h)} className="text-sm uppercase tracking-wider text-ink/80 transition hover:text-ink">{l}</button>
+          {links.slice(0, 3).map(([label, href]) => (
+            <button
+              key={label}
+              onClick={() => navigate(href)}
+              className="text-sm uppercase tracking-wider text-ink/80 transition hover:text-ink"
+            >
+              {label}
+            </button>
           ))}
         </nav>
 
+        {/* Header Actions */}
         <div className="flex items-center gap-3">
-<button
-  onClick={() => navigate('/cart')}
-  aria-label="Cart"
-  className="relative"
->
-  <ShoppingBag className="h-5 w-5" />
 
-  {cartCount > 0 && (
-    <span className="absolute -right-2 -top-2 grid h-4 w-4 place-items-center rounded-full bg-rose text-[9px] text-ink">
-      {cartCount}
-    </span>
-  )}
-</button>
-<button
-  onClick={() => navigate('/cart')}
-  aria-label="Cart"
-  className="relative"
->
-  <ShoppingBag className="h-5 w-5" />
+          {/* Cart — ONLY ONE */}
+          <button
+            onClick={() => navigate('/cart')}
+            aria-label="Cart"
+            className="relative"
+          >
+            <ShoppingBag className="h-5 w-5" />
 
-  {cartCount > 0 && (
-    <span className="absolute -right-2 -top-2 grid h-4 w-4 place-items-center rounded-full bg-rose text-[9px] text-ink">
-      {cartCount}
-    </span>
-  )}
-</button>
-          <button onClick={() => navigate('/shop')} aria-label="Search"><Search className="h-5 w-5" /></button>
-          <button onClick={() => navigate('/wishlist')} aria-label="Wishlist" className="relative">
-            <Heart className="h-5 w-5" />
-            {wishCount > 0 && <span className="absolute -right-2 -top-2 grid h-4 w-4 place-items-center rounded-full bg-rose text-[9px] text-ink">{wishCount}</span>}
+            {cartCount > 0 && (
+              <span className="absolute -right-2 -top-2 grid h-4 w-4 place-items-center rounded-full bg-rose text-[9px] text-ink">
+                {cartCount}
+              </span>
+            )}
           </button>
+
+          {/* Search */}
+          <button
+            onClick={() => navigate('/shop')}
+            aria-label="Search"
+          >
+            <Search className="h-5 w-5" />
+          </button>
+
+          {/* Wishlist */}
+          <button
+            onClick={() => navigate('/wishlist')}
+            aria-label="Wishlist"
+            className="relative"
+          >
+            <Heart className="h-5 w-5" />
+
+            {wishCount > 0 && (
+              <span className="absolute -right-2 -top-2 grid h-4 w-4 place-items-center rounded-full bg-rose text-[9px] text-ink">
+                {wishCount}
+              </span>
+            )}
+          </button>
+
         </div>
       </div>
     </header>
@@ -805,30 +868,35 @@ function Cart({
   const orderOnWhatsApp = () => {
     if (!cart.length || !waNumber) return
 
-    const lines = cart.map((item, index) => {
-      const itemTotal = item.price * item.quantity
+const lines = cart.map((item, index) => {
+  const itemTotal = item.price * item.quantity
 
-      return [
-        `${index + 1}. ${item.product_name}`,
-        `   Size: ${item.size || 'Free Size'}`,
-        `   Colour: ${item.colour || '—'}`,
-        `   Qty: ${item.quantity}`,
-        `   Price: ${inr(item.price)}`,
-        `   Subtotal: ${inr(itemTotal)}`,
-      ].join('\n')
-    })
+  return [
+    `*${index + 1}. ${item.product_name}*`,
+    `   Size: ${item.size || 'Free Size'}`,
+    `   Colour: ${item.colour || '—'}`,
+    `   Quantity: ${item.quantity}`,
+    `   Price: ${inr(item.price)}`,
+    `   Subtotal: ${inr(itemTotal)}`,
+    '',
+  ].join('\n')
+})
 
-    const message = [
-      'Hello Thretha Couture! 👋',
-      '',
-      'I would like to order the following items:',
-      '',
-      ...lines,
-      '',
-      `Total: ${inr(cartTotal)}`,
-      '',
-      'Please confirm availability and order details.',
-    ].join('\n')
+ const message = [
+  '✨ *THRETHA COUTURE — ORDER REQUEST*',
+  '',
+  'Hello Thretha Couture! 👋',
+  '',
+  '*I would like to order the following items:*',
+  '',
+  ...lines,
+  '',
+  '━━━━━━━━━━━━━━━━━━━━',
+  `*TOTAL: ${inr(cartTotal)}*`,
+  '━━━━━━━━━━━━━━━━━━━━',
+  '',
+  'Please confirm availability and order details.',
+].join('\n')
 
     window.open(
       `https://wa.me/${waNumber}?text=${encodeURIComponent(message)}`,
@@ -1046,23 +1114,36 @@ function Wishlist({ navigate, settings }) {
   )
 }
 
-/* ---------------- Store shell ---------------- */
+//* ---------------- Store shell ---------------- */
 export default function Store({ path, navigate }) {
   const [settings, setSettings] = useState(null)
   const [wishCount, setWishCount] = useState(0)
-    const [cart, setCart] = useState([])
+  const [cart, setCart] = useState([])
+
+  // Load cart from localStorage
   useEffect(() => {
     try {
-      const savedCart = JSON.parse(localStorage.getItem('thretha_cart') || '[]')
-      if (Array.isArray(savedCart)) setCart(savedCart)
+      const savedCart = JSON.parse(
+        localStorage.getItem('thretha_cart') || '[]'
+      )
+
+      if (Array.isArray(savedCart)) {
+        setCart(savedCart)
+      }
     } catch {
       setCart([])
     }
   }, [])
 
+  // Save cart whenever it changes
   useEffect(() => {
-    localStorage.setItem('thretha_cart', JSON.stringify(cart))
+    localStorage.setItem(
+      'thretha_cart',
+      JSON.stringify(cart)
+    )
   }, [cart])
+
+  // Add product to cart
   const addToCart = (product, quantity = 1, size = null) => {
     setCart((current) => {
       const existingIndex = current.findIndex(
@@ -1071,16 +1152,18 @@ export default function Store({ path, navigate }) {
           item.size === size
       )
 
+      // Already in cart:
+      // Do NOT increase quantity when Add to Cart
+      // is clicked again.
       if (existingIndex >= 0) {
-        return current.map((item, index) =>
-          index === existingIndex
-            ? {
-                ...item,
-                quantity: item.quantity + quantity,
-              }
-            : item
-        )
+        return current
       }
+
+      // Get the correct product image from media
+      const primaryImage =
+        product.media?.find((m) => m.is_primary)?.url ||
+        product.media?.find((m) => m.type !== 'video')?.url ||
+        ''
 
       return [
         ...current,
@@ -1090,7 +1173,7 @@ export default function Store({ path, navigate }) {
           slug: product.slug,
           price: product.discount_price || product.price,
           original_price: product.price,
-          image: product.image || product.images?.[0] || '',
+          image: primaryImage,
           size,
           colour: product.colour,
           quantity,
@@ -1099,91 +1182,199 @@ export default function Store({ path, navigate }) {
     })
   }
 
-  const updateCartQuantity = (productId, size, quantity) => {
+  // Update quantity from Cart page
+  const updateCartQuantity = (
+    productId,
+    size,
+    quantity
+  ) => {
+    // Remove item if quantity reaches zero
     if (quantity <= 0) {
       setCart((current) =>
         current.filter(
           (item) =>
-            !(item.product_id === productId && item.size === size)
+            !(
+              item.product_id === productId &&
+              item.size === size
+            )
         )
       )
+
       return
     }
 
     setCart((current) =>
       current.map((item) =>
-        item.product_id === productId && item.size === size
-          ? { ...item, quantity }
+        item.product_id === productId &&
+        item.size === size
+          ? {
+              ...item,
+              quantity,
+            }
           : item
       )
     )
   }
 
-  const removeFromCart = (productId, size) => {
+  // Remove complete item from cart
+  const removeFromCart = (
+    productId,
+    size
+  ) => {
     setCart((current) =>
       current.filter(
         (item) =>
-          !(item.product_id === productId && item.size === size)
+          !(
+            item.product_id === productId &&
+            item.size === size
+          )
       )
     )
   }
 
+  // Total number of products in cart
   const cartCount = cart.reduce(
-    (total, item) => total + item.quantity,
+    (total, item) =>
+      total + item.quantity,
     0
   )
 
+  // Total cart price
   const cartTotal = cart.reduce(
-    (total, item) => total + item.price * item.quantity,
+    (total, item) =>
+      total +
+      item.price * item.quantity,
     0
   )
-  useEffect(() => { api('/settings').then(setSettings).catch(() => {}) }, [])
+
+  // Load settings
   useEffect(() => {
-    const upd = () => setWishCount(getWishlist().length)
-    upd(); window.addEventListener('tc-wishlist', upd)
-    return () => window.removeEventListener('tc-wishlist', upd)
+    api('/settings')
+      .then(setSettings)
+      .catch(() => {})
   }, [])
-  useEffect(() => { window.scrollTo(0, 0) }, [path])
+
+  // Wishlist count
+  useEffect(() => {
+    const updateWishlistCount = () => {
+      setWishCount(getWishlist().length)
+    }
+
+    updateWishlistCount()
+
+    window.addEventListener(
+      'tc-wishlist',
+      updateWishlistCount
+    )
+
+    return () => {
+      window.removeEventListener(
+        'tc-wishlist',
+        updateWishlistCount
+      )
+    }
+  }, [])
+
+  // Scroll to top when page changes
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [path])
 
   let view
- if (path === '/') view = <Home navigate={navigate} settings={settings} />
-else if (path === '/collections') view = <Collections navigate={navigate} settings={settings} />
-else if (path === '/shop' || path.startsWith('/category/') || path === '/new-arrivals') view = <ProductGrid navigate={navigate} settings={settings} path={path} />
-else if (path.startsWith('/product/')) view =
-  <ProductDetail
-    navigate={navigate}
-    settings={settings}
-    slug={path.split('/')[2]}
-    addToCart={addToCart}
-  />
-else if (path === '/cart') view =
-  <Cart
-    navigate={navigate}
-    settings={settings}
-    cart={cart}
-    updateCartQuantity={updateCartQuantity}
-    removeFromCart={removeFromCart}
-    cartTotal={cartTotal}
-  />
-  else view = (
-    <div className="container py-24 text-center">
-      <p className="font-display text-5xl text-ink">This page wandered off somewhere.</p>
-      <Button onClick={() => navigate('/')} className="mt-6 rounded-none bg-ink text-cream">Back to the collection →</Button>
-    </div>
-  )
+
+  if (path === '/') {
+    view = (
+      <Home
+        navigate={navigate}
+        settings={settings}
+      />
+    )
+  } else if (path === '/collections') {
+    view = (
+      <Collections
+        navigate={navigate}
+        settings={settings}
+      />
+    )
+  } else if (
+    path === '/shop' ||
+    path.startsWith('/category/') ||
+    path === '/new-arrivals'
+  ) {
+    view = (
+      <ProductGrid
+        navigate={navigate}
+        settings={settings}
+        path={path}
+      />
+    )
+  } else if (path.startsWith('/product/')) {
+    view = (
+      <ProductDetail
+        navigate={navigate}
+        settings={settings}
+        slug={path.split('/')[2]}
+        addToCart={addToCart}
+      />
+    )
+  } else if (path === '/cart') {
+    view = (
+      <Cart
+        navigate={navigate}
+        settings={settings}
+        cart={cart}
+        updateCartQuantity={updateCartQuantity}
+        removeFromCart={removeFromCart}
+        cartTotal={cartTotal}
+      />
+    )
+  } else if (path === '/wishlist') {
+    view = (
+      <Wishlist
+        navigate={navigate}
+        settings={settings}
+      />
+    )
+  } else {
+    view = (
+      <div className="container py-24 text-center">
+        <p className="font-display text-5xl text-ink">
+          This page wandered off somewhere.
+        </p>
+
+        <Button
+          onClick={() => navigate('/')}
+          className="mt-6 rounded-none bg-ink text-cream"
+        >
+          Back to the collection →
+        </Button>
+      </div>
+    )
+  }
 
   return (
-    <div className="min-h-screen pb-16 md:pb-0">
-     <Header
-  navigate={navigate}
-  settings={settings}
-  wishCount={wishCount}
-  cartCount={cartCount}
-/>
-      <main className="animate-fade-in">{view}</main>
-      <Footer navigate={navigate} settings={settings} />
-      <FloatingWA settings={settings} />
-      <MobileNav navigate={navigate} settings={settings} path={path} />
+    <div className="min-h-screen bg-paper text-ink">
+      <Header
+        navigate={navigate}
+        settings={settings}
+        wishCount={wishCount}
+        cartCount={cartCount}
+      />
+
+      <main className="animate-fade-in">
+        {view}
+      </main>
+
+      <Footer
+        navigate={navigate}
+        settings={settings}
+      />
+
+      <MobileNav
+        navigate={navigate}
+        path={path}
+        settings={settings}
+      />
     </div>
   )
 }
