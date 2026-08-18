@@ -87,7 +87,7 @@ const secondary = images.find((m) => m !== primary)
 }
 
 /* ---------------- Header ---------------- */
-function Header({ navigate, settings, wishCount }) {
+function Header({ navigate, settings, wishCount, cartCount }) {
   const [open, setOpen] = useState(false)
   const links = [
     ['Shop', '/shop'],
@@ -126,6 +126,32 @@ function Header({ navigate, settings, wishCount }) {
         </nav>
 
         <div className="flex items-center gap-3">
+<button
+  onClick={() => navigate('/cart')}
+  aria-label="Cart"
+  className="relative"
+>
+  <ShoppingBag className="h-5 w-5" />
+
+  {cartCount > 0 && (
+    <span className="absolute -right-2 -top-2 grid h-4 w-4 place-items-center rounded-full bg-rose text-[9px] text-ink">
+      {cartCount}
+    </span>
+  )}
+</button>
+<button
+  onClick={() => navigate('/cart')}
+  aria-label="Cart"
+  className="relative"
+>
+  <ShoppingBag className="h-5 w-5" />
+
+  {cartCount > 0 && (
+    <span className="absolute -right-2 -top-2 grid h-4 w-4 place-items-center rounded-full bg-rose text-[9px] text-ink">
+      {cartCount}
+    </span>
+  )}
+</button>
           <button onClick={() => navigate('/shop')} aria-label="Search"><Search className="h-5 w-5" /></button>
           <button onClick={() => navigate('/wishlist')} aria-label="Wishlist" className="relative">
             <Heart className="h-5 w-5" />
@@ -541,8 +567,7 @@ function ProductGrid({ navigate, settings, path }) {
 }
 
 /* ---------------- Product Detail ---------------- */
-function ProductDetail({ navigate, settings, slug }) {
-  const [p, setP] = useState(null)
+function ProductDetail({ navigate, settings, slug, addToCart }) {  const [p, setP] = useState(null)
   const [err, setErr] = useState(false)
   const [active, setActive] = useState(0)
   const [size, setSize] = useState('')
@@ -683,9 +708,19 @@ function ProductDetail({ navigate, settings, slug }) {
             {soldOut ? (
               <Button disabled className="rounded-none bg-ink/40 px-10 py-6 text-xs uppercase tracking-[0.25em] text-cream">Sold Out</Button>
             ) : (
-              <Button onClick={() => setOrderOpen(true)} className="rounded-none bg-[#25D366] px-10 py-6 text-xs uppercase tracking-[0.25em] text-white hover:bg-[#1eb457]">
-                Order on WhatsApp <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
+              <Button
+  onClick={() =>
+    addToCart(
+      p,
+      qty,
+      size || (p.sizes?.[0]?.size || 'Free Size')
+    )
+  }
+  className="rounded-none bg-ink px-10 py-6 text-xs uppercase tracking-[0.25em] text-cream"
+>
+  Add to Cart
+  <ShoppingBag className="ml-2 h-4 w-4" />
+</Button>
             )}
             <Button variant="outline" onClick={() => setSaved(toggleWishlist(p.slug).includes(p.slug))} className="rounded-none border-ink px-8 py-6 text-xs uppercase tracking-widest">
               <Heart className={cn('mr-2 h-4 w-4', saved && 'fill-rose text-rose')} /> Save for later
@@ -756,7 +791,231 @@ function OrderDialog({ open, onOpenChange, product, size, qty, settings }) {
     </Dialog>
   )
 }
+/* ---------------- Cart ---------------- */
+function Cart({
+  navigate,
+  settings,
+  cart,
+  updateCartQuantity,
+  removeFromCart,
+  cartTotal,
+}) {
+  const waNumber = (settings?.whatsapp || '').replace(/[^0-9]/g, '')
 
+  const orderOnWhatsApp = () => {
+    if (!cart.length || !waNumber) return
+
+    const lines = cart.map((item, index) => {
+      const itemTotal = item.price * item.quantity
+
+      return [
+        `${index + 1}. ${item.product_name}`,
+        `   Size: ${item.size || 'Free Size'}`,
+        `   Colour: ${item.colour || '—'}`,
+        `   Qty: ${item.quantity}`,
+        `   Price: ${inr(item.price)}`,
+        `   Subtotal: ${inr(itemTotal)}`,
+      ].join('\n')
+    })
+
+    const message = [
+      'Hello Thretha Couture! 👋',
+      '',
+      'I would like to order the following items:',
+      '',
+      ...lines,
+      '',
+      `Total: ${inr(cartTotal)}`,
+      '',
+      'Please confirm availability and order details.',
+    ].join('\n')
+
+    window.open(
+      `https://wa.me/${waNumber}?text=${encodeURIComponent(message)}`,
+      '_blank'
+    )
+  }
+
+  if (cart.length === 0) {
+    return (
+      <main className="container py-20 text-center">
+        <ShoppingBag className="mx-auto h-10 w-10 text-ink/30" />
+
+        <h1 className="mt-5 font-display text-4xl text-ink">
+          Your bag is empty
+        </h1>
+
+        <p className="mt-3 text-sm text-brown">
+          Discover something beautiful for your wardrobe.
+        </p>
+
+        <Button
+          onClick={() => navigate('/collections')}
+          className="mt-7 rounded-none bg-ink px-8 py-6 text-xs uppercase tracking-[0.2em] text-cream"
+        >
+          Explore Collections
+        </Button>
+      </main>
+    )
+  }
+
+  return (
+    <main className="container py-10 md:py-16">
+      <div className="mb-10">
+        <p className="text-xs uppercase tracking-[0.25em] text-brown">
+          Thretha Couture
+        </p>
+
+        <h1 className="mt-2 font-display text-5xl text-ink md:text-6xl">
+          Your Bag
+        </h1>
+
+        <p className="mt-3 text-sm text-brown">
+          Review your selected pieces before ordering.
+        </p>
+      </div>
+
+      <div className="grid gap-10 lg:grid-cols-[1fr_360px]">
+        <div className="space-y-5">
+          {cart.map((item) => (
+            <div
+              key={`${item.product_id}-${item.size}`}
+              className="flex gap-4 border-b border-ink/10 pb-5"
+            >
+              <button
+                type="button"
+                onClick={() => navigate(`/product/${item.slug}`)}
+                className="h-32 w-24 shrink-0 overflow-hidden bg-cream"
+              >
+                {item.image ? (
+                  <img
+                    src={item.image}
+                    alt={item.product_name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="grid h-full place-items-center text-xs text-ink/30">
+                    No image
+                  </div>
+                )}
+              </button>
+
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/product/${item.slug}`)}
+                  className="text-left font-display text-2xl text-ink"
+                >
+                  {item.product_name}
+                </button>
+
+                <p className="mt-1 text-sm text-brown">
+                  {item.size || 'Free Size'}
+                  {item.colour ? ` · ${item.colour}` : ''}
+                </p>
+
+                <p className="mt-2 text-sm text-ink">
+                  {inr(item.price)}
+                </p>
+
+                <div className="mt-4 flex items-center justify-between">
+                  <div className="flex items-center border border-ink/20">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateCartQuantity(
+                          item.product_id,
+                          item.size,
+                          item.quantity - 1
+                        )
+                      }
+                      className="grid h-9 w-9 place-items-center"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+
+                    <span className="w-9 text-center text-sm">
+                      {item.quantity}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateCartQuantity(
+                          item.product_id,
+                          item.size,
+                          item.quantity + 1
+                        )
+                      }
+                      className="grid h-9 w-9 place-items-center"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      removeFromCart(item.product_id, item.size)
+                    }
+                    className="text-xs uppercase tracking-wider text-ink/50 underline underline-offset-4"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+
+              <div className="hidden text-right sm:block">
+                <p className="text-sm text-ink">
+                  {inr(item.price * item.quantity)}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <aside className="h-fit border border-ink/10 bg-cream p-6">
+          <h2 className="font-display text-2xl text-ink">
+            Order Summary
+          </h2>
+
+          <div className="mt-6 flex items-center justify-between border-b border-ink/10 pb-4 text-sm">
+            <span className="text-brown">Subtotal</span>
+            <span className="text-ink">{inr(cartTotal)}</span>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between text-sm">
+            <span className="text-brown">Shipping</span>
+            <span className="text-brown">
+              {settings?.shipping?.delivery_charges || 'Calculated separately'}
+            </span>
+          </div>
+
+          <div className="mt-6 flex items-center justify-between">
+            <span className="font-display text-xl">Total</span>
+            <span className="text-xl text-ink">{inr(cartTotal)}</span>
+          </div>
+
+          <Button
+            onClick={orderOnWhatsApp}
+            className="mt-7 w-full rounded-none bg-[#25D366] py-6 text-xs uppercase tracking-[0.2em] text-white hover:bg-[#1eb457]"
+          >
+            Order All on WhatsApp
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="outline"
+            onClick={() => navigate('/shop')}
+            className="mt-3 w-full rounded-none border-ink py-6 text-xs uppercase tracking-[0.2em]"
+          >
+            Continue Shopping
+          </Button>
+        </aside>
+      </div>
+    </main>
+  )
+}
 /* ---------------- Wishlist ---------------- */
 function Wishlist({ navigate, settings }) {
   const [items, setItems] = useState([])
@@ -791,6 +1050,93 @@ function Wishlist({ navigate, settings }) {
 export default function Store({ path, navigate }) {
   const [settings, setSettings] = useState(null)
   const [wishCount, setWishCount] = useState(0)
+    const [cart, setCart] = useState([])
+  useEffect(() => {
+    try {
+      const savedCart = JSON.parse(localStorage.getItem('thretha_cart') || '[]')
+      if (Array.isArray(savedCart)) setCart(savedCart)
+    } catch {
+      setCart([])
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem('thretha_cart', JSON.stringify(cart))
+  }, [cart])
+  const addToCart = (product, quantity = 1, size = null) => {
+    setCart((current) => {
+      const existingIndex = current.findIndex(
+        (item) =>
+          item.product_id === product.id &&
+          item.size === size
+      )
+
+      if (existingIndex >= 0) {
+        return current.map((item, index) =>
+          index === existingIndex
+            ? {
+                ...item,
+                quantity: item.quantity + quantity,
+              }
+            : item
+        )
+      }
+
+      return [
+        ...current,
+        {
+          product_id: product.id,
+          product_name: product.name,
+          slug: product.slug,
+          price: product.discount_price || product.price,
+          original_price: product.price,
+          image: product.image || product.images?.[0] || '',
+          size,
+          colour: product.colour,
+          quantity,
+        },
+      ]
+    })
+  }
+
+  const updateCartQuantity = (productId, size, quantity) => {
+    if (quantity <= 0) {
+      setCart((current) =>
+        current.filter(
+          (item) =>
+            !(item.product_id === productId && item.size === size)
+        )
+      )
+      return
+    }
+
+    setCart((current) =>
+      current.map((item) =>
+        item.product_id === productId && item.size === size
+          ? { ...item, quantity }
+          : item
+      )
+    )
+  }
+
+  const removeFromCart = (productId, size) => {
+    setCart((current) =>
+      current.filter(
+        (item) =>
+          !(item.product_id === productId && item.size === size)
+      )
+    )
+  }
+
+  const cartCount = cart.reduce(
+    (total, item) => total + item.quantity,
+    0
+  )
+
+  const cartTotal = cart.reduce(
+    (total, item) => total + item.price * item.quantity,
+    0
+  )
   useEffect(() => { api('/settings').then(setSettings).catch(() => {}) }, [])
   useEffect(() => {
     const upd = () => setWishCount(getWishlist().length)
@@ -803,8 +1149,22 @@ export default function Store({ path, navigate }) {
  if (path === '/') view = <Home navigate={navigate} settings={settings} />
 else if (path === '/collections') view = <Collections navigate={navigate} settings={settings} />
 else if (path === '/shop' || path.startsWith('/category/') || path === '/new-arrivals') view = <ProductGrid navigate={navigate} settings={settings} path={path} />
-else if (path.startsWith('/product/')) view = <ProductDetail navigate={navigate} settings={settings} slug={path.split('/')[2]} />
-else if (path === '/wishlist') view = <Wishlist navigate={navigate} settings={settings} />
+else if (path.startsWith('/product/')) view =
+  <ProductDetail
+    navigate={navigate}
+    settings={settings}
+    slug={path.split('/')[2]}
+    addToCart={addToCart}
+  />
+else if (path === '/cart') view =
+  <Cart
+    navigate={navigate}
+    settings={settings}
+    cart={cart}
+    updateCartQuantity={updateCartQuantity}
+    removeFromCart={removeFromCart}
+    cartTotal={cartTotal}
+  />
   else view = (
     <div className="container py-24 text-center">
       <p className="font-display text-5xl text-ink">This page wandered off somewhere.</p>
@@ -814,7 +1174,12 @@ else if (path === '/wishlist') view = <Wishlist navigate={navigate} settings={se
 
   return (
     <div className="min-h-screen pb-16 md:pb-0">
-      <Header navigate={navigate} settings={settings} wishCount={wishCount} />
+     <Header
+  navigate={navigate}
+  settings={settings}
+  wishCount={wishCount}
+  cartCount={cartCount}
+/>
       <main className="animate-fade-in">{view}</main>
       <Footer navigate={navigate} settings={settings} />
       <FloatingWA settings={settings} />
