@@ -27,6 +27,7 @@ import {
   Monitor,
 } from 'lucide-react'
 import { api } from '@/lib/tc'
+import { uploadMediaFile } from '@/lib/mediaUpload'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -73,6 +74,7 @@ export default function InstagramFeedManager({ token, initialSettings, onSetting
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingPostId, setEditingPostId] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [postToDelete, setPostToDelete] = useState(null)
 
   const [formData, setFormData] = useState({
@@ -229,15 +231,11 @@ export default function InstagramFeedManager({ token, initialSettings, onSetting
 
     try {
       setUploadingImage(true)
-      const data = new FormData()
-      data.append('file', file)
-      data.append('folder', 'instagram')
-
-      const res = await api('/admin/media', {
-        method: 'POST',
+      setUploadProgress(0)
+      const res = await uploadMediaFile(file, {
         token,
-        body: data,
-        isFormData: true,
+        folder: 'instagram',
+        onProgress: setUploadProgress,
       })
 
       if (res?.url) {
@@ -259,6 +257,7 @@ export default function InstagramFeedManager({ token, initialSettings, onSetting
       })
     } finally {
       setUploadingImage(false)
+      setUploadProgress(0)
     }
   }
 
@@ -1331,7 +1330,7 @@ export default function InstagramFeedManager({ token, initialSettings, onSetting
                   <div className="space-y-2 flex-1">
                     <label className="inline-flex items-center gap-2 px-3 py-2 bg-sand border border-ink/15 text-ink hover:bg-gold-light/40 cursor-pointer font-medium">
                       <Upload className="h-3.5 w-3.5" />
-                      <span>{uploadingImage ? 'Uploading Image…' : 'Upload Image File'}</span>
+                      <span>{uploadingImage ? `Uploading Image… ${uploadProgress}%` : 'Upload Image File'}</span>
                       <input
                         type="file"
                         accept="image/*,video/*"

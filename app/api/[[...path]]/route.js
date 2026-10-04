@@ -5,7 +5,8 @@ import { revalidatePath } from 'next/cache'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
-import { saveUpload, serveMedia } from '../../../lib/storage.js'
+import { v2 as cloudinary } from 'cloudinary'
+import { serveMedia, cloudinaryEnabled } from '../../../lib/storage.js'
 import { sendLoginOtp } from '../../../lib/email.js'
 import {
   signCustomerToken,
@@ -2780,6 +2781,34 @@ const onlineVisitors = await sessions.distinct('visitor_id', {
       const auth = requireAuth(request)
       if (!auth) return json({ error: 'Unauthorized' }, 401)
 
+      if (route === '/admin/media/signature' && method === 'POST') {
+        if (!cloudinaryEnabled()) return json({ error: 'Cloudinary uploads are not configured.' }, 503)
+
+        const body = await request.json().catch(() => ({}))
+        const resourceType = body.resourceType === 'video' ? 'video' : 'image'
+        const requestedFolder = String(body.folder || 'catalog')
+        const safeFolder = requestedFolder
+          .replace(/[^a-zA-Z0-9/_-]/g, '')
+          .replace(/\/{2,}/g, '/')
+          .replace(/^\/+|\/+$/g, '')
+          .slice(0, 60) || 'catalog'
+        const folder = `thretha/${safeFolder}`
+        const timestamp = Math.floor(Date.now() / 1000)
+        const signature = cloudinary.utils.api_sign_request(
+          { folder, timestamp },
+          process.env.CLOUDINARY_API_SECRET
+        )
+
+        return json({
+          cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+          api_key: process.env.CLOUDINARY_API_KEY,
+          timestamp,
+          folder,
+          resource_type: resourceType,
+          signature,
+        })
+      }
+
       if (route === '/admin/me' && method === 'GET') return json({ user: auth })
       // ---- Change admin password ----
       if (route === '/admin/change-password' && method === 'POST') {
@@ -3944,12 +3973,7 @@ const onlineVisitors = await sessions.distinct('visitor_id', {
 
       // ---- Media upload (admin) ----
       if (route === '/admin/media' && method === 'POST') {
-        const form = await request.formData()
-        const file = form.get('file')
-        if (!file || typeof file === 'string') return json({ error: 'file is required' }, 400)
-        const folder = String(form.get('folder') || 'catalog')
-        const res = await saveUpload(file, folder)
-        return json(res)
+        return json({ error: 'Use the signed direct-to-Cloudinary upload flow.' }, 410)
       }
     }
 

@@ -44,6 +44,7 @@ import {
 import { cn } from '@/lib/utils'
 import { api, inr, auth } from '@/lib/tc'
 import { getColourData } from '@/lib/colours'
+import { uploadMediaFile } from '@/lib/mediaUpload'
 
 function extractProductColours(product) {
   if (!product) return []
@@ -67,20 +68,20 @@ function extractProductColours(product) {
 function Uploader({ token, label = 'Upload Image', onDone }) {
   const ref = useRef()
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(0)
 
   const handle = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
     setBusy(true)
-    const fd = new FormData()
-    fd.append('file', file)
     try {
-      const res = await api('/admin/media', { method: 'POST', body: fd, token })
+      const res = await uploadMediaFile(file, { token, folder: 'combos', onProgress: setProgress })
       onDone(res?.url || res?.file?.url || '')
     } catch (err) {
       alert(err.message || 'Media upload failed')
     } finally {
       setBusy(false)
+      setProgress(0)
       if (ref.current) ref.current.value = ''
     }
   }
@@ -97,7 +98,7 @@ function Uploader({ token, label = 'Upload Image', onDone }) {
         className="rounded-none border-ink/20 bg-cream text-xs uppercase tracking-wider text-ink hover:bg-sand/30"
       >
         <Upload className="mr-1.5 h-3.5 w-3.5 text-mango-dark" />
-        {busy ? 'Uploading…' : label}
+        {busy ? `Uploading… ${progress}%` : label}
       </Button>
     </div>
   )
@@ -1529,4 +1530,3 @@ export default function CombosManager() {
     </div>
   )
 }
-

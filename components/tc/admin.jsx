@@ -53,6 +53,7 @@ import { api, inr, auth } from '@/lib/tc'
 import { broadcastStorefrontSettingsChanged } from '@/lib/storefrontEvents'
 import { DEFAULT_HOMEPAGE_CONTENT } from '@/lib/homepageContent'
 import { DELIVERY_SERVICES } from '@/lib/deliveryServices'
+import { uploadMediaFile } from '@/lib/mediaUpload'
 
 const STATUSES = [
   'NEW',
@@ -69,22 +70,23 @@ const ALL_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free Size']
 function Uploader({ token, label = 'Upload Media', multiple = false, onDone }) {
   const ref = useRef()
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(0)
 
   const handle = async (e) => {
     const files = Array.from(e.target.files || [])
     if (!files.length) return
     setBusy(true)
     for (const file of files) {
-      const fd = new FormData()
-      fd.append('file', file)
       try {
-        const res = await api('/admin/media', { method: 'POST', body: fd, token })
+        setProgress(0)
+        const res = await uploadMediaFile(file, { token, onProgress: setProgress })
         onDone(res)
       } catch (err) {
         alert(err.message || 'Media upload failed')
       }
     }
     setBusy(false)
+    setProgress(0)
     if (ref.current) ref.current.value = ''
   }
 
@@ -107,7 +109,7 @@ function Uploader({ token, label = 'Upload Media', multiple = false, onDone }) {
         className="rounded-none border-ink/20 bg-cream text-xs uppercase tracking-wider text-ink hover:bg-sand/30"
       >
         <Upload className="mr-2 h-3.5 w-3.5 text-gold-dark" />
-        {busy ? 'Uploading…' : label}
+        {busy ? `Uploading… ${progress}%` : label}
       </Button>
     </div>
   )
@@ -586,15 +588,21 @@ function ProductEditor({ token, product, categories, onClose, onSaved }) {
   }
 
   const addMedia = (m) => {
-    set('media', [
-      ...(f.media || []),
-      {
-        ...m,
-        id: crypto.randomUUID(),
-        is_primary: (f.media || []).length === 0,
-        display_order: (f.media || []).length,
-      },
-    ])
+    setF((current) => {
+      const media = current.media || []
+      return {
+        ...current,
+        media: [
+          ...media,
+          {
+            ...m,
+            id: crypto.randomUUID(),
+            is_primary: media.length === 0,
+            display_order: media.length,
+          },
+        ],
+      }
+    })
   }
 
   const removeMedia = (id) => {
