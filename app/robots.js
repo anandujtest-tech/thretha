@@ -1,10 +1,9 @@
+import { SITE_URL } from '@/lib/seo'
+
 export default function robots() {
   return {
-    rules: {
-      userAgent: '*',
-      allow: '/',
-      disallow: ['/admin/'],
-    },
-    sitemap: 'https://thretha.in/sitemap.xml',
+    rules: { userAgent: '*', allow: '/', disallow: ['/admin/'] },
+    sitemap: `${SITE_URL}/sitemap.xml`,
+    host: SITE_URL,
   }
 }

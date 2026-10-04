@@ -130,7 +130,6 @@ async function main() {
     saree_edit_image: M('05'),
     brand_story: 'Thretha Couture is a little space for pieces we fall in love with \u2014 sarees, silhouettes and everyday favourites chosen with a soft spot for Kerala style.',
     brand_story_image: M('04'),
-    instagram_gallery: ['11', '08', '09', '10', '12', '06'].map((s) => M(s)),
     created_at: now, updated_at: now,
   })
   console.log('✓ Settings created (WhatsApp:', DEFAULT_WHATSAPP + ')')
