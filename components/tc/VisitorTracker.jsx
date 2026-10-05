@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
+import { sendVisitorHeartbeat, trackPageVisit } from '@/lib/visitorAnalytics'
 
 export default function VisitorTracker() {
   const pathname = usePathname()
@@ -11,34 +12,7 @@ export default function VisitorTracker() {
     if (!pathname || lastTracked.current === pathname) return
     lastTracked.current = pathname
 
-    const trackVisit = () => {
-      try {
-        const key = 'thretha_visitor_id'
-        let visitorId = localStorage.getItem(key)
-        if (!visitorId) {
-          visitorId = crypto.randomUUID()
-          localStorage.setItem(key, visitorId)
-        }
-
-        const ua = navigator.userAgent || ''
-        let deviceType = 'Desktop'
-        if (/tablet|ipad/i.test(ua)) deviceType = 'Tablet'
-        else if (/mobile|android|iphone|ipod/i.test(ua)) deviceType = 'Mobile'
-
-        fetch('/api/analytics/visit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            visitor_id: visitorId,
-            page: pathname,
-            device_type: deviceType,
-            browser: 'Browser',
-            operating_system: 'OS',
-          }),
-          keepalive: true,
-        }).catch(() => {})
-      } catch {}
-    }
+    const trackVisit = () => trackPageVisit(pathname)
     let idleId
     let timer
     if ('requestIdleCallback' in window) {
@@ -46,10 +20,14 @@ export default function VisitorTracker() {
     } else {
       timer = window.setTimeout(trackVisit, 1000)
     }
+    const heartbeat = window.setInterval(() => {
+      if (document.visibilityState === 'visible') sendVisitorHeartbeat(pathname)
+    }, 60_000)
 
     return () => {
       if (idleId !== undefined) window.cancelIdleCallback(idleId)
       window.clearTimeout(timer)
+      window.clearInterval(heartbeat)
     }
   }, [pathname])
 

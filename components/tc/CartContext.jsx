@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 import { getWishlist, toggleWishlist as toggleWishlistStorage, inWishlist as inWishlistStorage, api } from '@/lib/tc'
+import { trackVisitorEvent } from '@/lib/visitorAnalytics'
 
 const CartContext = createContext(null)
 
@@ -316,6 +317,7 @@ export function CartProvider({ children }) {
       ]
     })
 
+    if (result.success) trackVisitorEvent('add_to_cart', { product_slug: product.slug })
     return result
   }
 
@@ -367,6 +369,8 @@ export function CartProvider({ children }) {
     }
 
     setCart((current) => [...current, newComboItem])
+
+    trackVisitorEvent('add_to_cart', { product_slug: combo.slug })
 
     return { success: true, addedQty: parsedQty, comboItem: newComboItem }
   }
@@ -491,6 +495,10 @@ export function CartProvider({ children }) {
 
   // 8. Remove from cart
   const removeFromCart = (keyOrId, size) => {
+    const removed = cart.find((item) => {
+      const itemKey = getItemKey(item)
+      return itemKey === keyOrId || String(item.cart_item_id) === keyOrId || (item.product_id === keyOrId && item.size === size)
+    })
     setCart((current) =>
       current.filter((item) => {
         const itemKey = getItemKey(item)
@@ -499,6 +507,7 @@ export function CartProvider({ children }) {
         return true
       })
     )
+    if (removed) trackVisitorEvent('remove_from_cart', { product_slug: removed.slug || removed.combo_slug })
   }
 
   // 9. Clear cart

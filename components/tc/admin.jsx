@@ -315,12 +315,17 @@ function Dashboard() {
   const [s, setS] = useState(null)
   const [analytics, setAnalytics] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [rangeDays, setRangeDays] = useState(30)
+  const [visitorPage, setVisitorPage] = useState(0)
+  const [visitorDetail, setVisitorDetail] = useState(null)
+  const [visitorDetailOpen, setVisitorDetailOpen] = useState(false)
+  const [visitorDetailLoading, setVisitorDetailLoading] = useState(false)
 
   const loadData = () => {
     setRefreshing(true)
     Promise.all([
       api('/admin/stats', { token }),
-      api('/admin/analytics', { token }),
+      api(`/admin/analytics?days=${rangeDays}&page=${visitorPage}`, { token }),
     ])
       .then(([stats, visitorData]) => {
         setS(stats)
@@ -335,7 +340,21 @@ function Dashboard() {
 
   useEffect(() => {
     loadData()
-  }, [])
+  }, [rangeDays, visitorPage])
+
+  const openVisitorDetails = async (visitorId) => {
+    setVisitorDetailOpen(true)
+    setVisitorDetail(null)
+    setVisitorDetailLoading(true)
+    try {
+      const details = await api(`/admin/analytics/visitor?visitor_id=${encodeURIComponent(visitorId)}`, { token })
+      setVisitorDetail(details)
+    } catch (error) {
+      setVisitorDetail({ error: error.message || 'Unable to load visitor details.' })
+    } finally {
+      setVisitorDetailLoading(false)
+    }
+  }
 
   if (!s || !analytics) {
     return (
@@ -356,12 +375,26 @@ function Dashboard() {
   ]
 
   const visitorCards = [
-    { label: 'Total Visitors', val: analytics.total_visitors },
-    { label: 'Today', val: analytics.today_visitors },
-    { label: 'This Week', val: analytics.week_visitors },
-    { label: 'This Month', val: analytics.month_visitors },
+    { label: 'Visitors', val: analytics.total_visitors, sub: `Last ${analytics.range_days} days` },
+    { label: 'Today', val: analytics.today_visitors, sub: 'Unique visitors' },
+    { label: 'Page Views', val: analytics.today_page_views, sub: 'Today' },
+    { label: 'Product Views', val: analytics.today_product_views, sub: 'Today' },
+    { label: 'Carts', val: analytics.today_carts, sub: 'Add-to-cart events today' },
+    { label: 'Orders', val: analytics.today_orders, sub: 'Orders recorded today' },
     { label: 'Online Now', val: analytics.currently_online, live: true },
   ]
+
+  const openMap = (visitor) => visitor?.location_permission === 'granted' &&
+    Number.isFinite(visitor.latitude) && visitor.latitude >= -90 && visitor.latitude <= 90 &&
+    Number.isFinite(visitor.longitude) && visitor.longitude >= -180 && visitor.longitude <= 180
+  const funnelSteps = [
+    { label: 'Visitors', value: analytics.funnel?.visitors },
+    { label: 'Product views', value: analytics.funnel?.product_views },
+    { label: 'Add to cart', value: analytics.funnel?.add_to_cart },
+    { label: 'Checkout started', value: analytics.funnel?.checkout_started },
+  ]
+  const sourceTotal = (analytics.traffic_sources || []).reduce((sum, row) => sum + row.visitors, 0)
+  const deviceTotal = (analytics.devices || []).reduce((sum, row) => sum + row.visitors, 0)
 
   return (
     <div className="space-y-8">
@@ -411,13 +444,18 @@ function Dashboard() {
             <h2 className="font-display text-2xl text-ink">Visitor Traffic Intelligence</h2>
             <p className="text-xs text-cocoa">Real-time visitor tracking and storefront engagement</p>
           </div>
-          <span className="flex items-center gap-1.5 text-xs text-green-700 font-medium">
-            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-            Live Tracking Active
-          </span>
+          <div className="flex items-center gap-3">
+            <label className="text-[10px] uppercase tracking-wider text-cocoa" htmlFor="visitor-range">Range</label>
+            <select id="visitor-range" value={rangeDays} onChange={(event) => { setVisitorPage(0); setRangeDays(Number(event.target.value)) }} className="border border-ink/15 bg-cream px-2 py-1.5 text-xs">
+              <option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option>
+            </select>
+            <span className="hidden sm:flex items-center gap-1.5 text-xs text-green-700 font-medium">
+              <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />Live
+            </span>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
           {visitorCards.map((vc) => (
             <div key={vc.label} className="border border-ink/10 bg-cream p-4">
               <p className="text-[10px] uppercase tracking-wider text-cocoa-light">
@@ -431,9 +469,47 @@ function Dashboard() {
                   <span className="h-2 w-2 rounded-full bg-green-500 animate-ping" />
                 )}
               </div>
+              {vc.sub && <p className="mt-1 text-[10px] text-cocoa-light">{vc.sub}</p>}
             </div>
           ))}
         </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <section className="border border-ink/10 bg-cream p-5">
+            <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-ink">Conversion Funnel · Last {analytics.range_days} days</h3>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {funnelSteps.map((step, index) => {
+                const rate = analytics.funnel?.visitors ? Math.round((step.value || 0) / analytics.funnel.visitors * 100) : 0
+                return <div key={step.label} className="border border-ink/10 bg-paper/60 p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-cocoa-light">{step.label}</p>
+                  <p className="mt-1 font-display text-2xl font-semibold text-ink">{step.value || 0}</p>
+                  <p className="text-[10px] text-cocoa">{index === 0 ? 'Entry' : `${rate}% of visitors`}</p>
+                </div>
+              })}
+            </div>
+            <p className="mt-3 text-[10px] text-cocoa-light">Orders are shown in today’s order count only; existing orders are not linked to visitor IDs, so visitor-to-order conversion is unavailable.</p>
+          </section>
+
+          <section className="border border-ink/10 bg-cream p-5">
+            <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-ink">First-touch traffic sources</h3>
+            {analytics.traffic_sources?.length ? <div className="space-y-2.5">
+              {analytics.traffic_sources.map((source) => <div key={source.source} className="flex items-center gap-3 text-xs">
+                <span className="w-24 truncate text-ink">{source.source}</span>
+                <div className="h-2 flex-1 bg-sand"><div className="h-full bg-mango-dark" style={{ width: `${sourceTotal ? Math.max(2, source.visitors / sourceTotal * 100) : 0}%` }} /></div>
+                <span className="w-16 text-right text-cocoa">{source.visitors} · {sourceTotal ? Math.round(source.visitors / sourceTotal * 100) : 0}%</span>
+              </div>)}
+            </div> : <p className="text-xs text-cocoa-light">No first-touch source data recorded yet.</p>}
+            <div className="mt-4 grid gap-4 border-t border-ink/10 pt-4 sm:grid-cols-2">
+              <div><p className="text-[10px] uppercase tracking-wider text-cocoa-light">New / returning</p><p className="mt-1 text-sm text-ink">🆕 {analytics.new_visitors || 0} new · 🔄 {analytics.returning_visitors || 0} returning</p></div>
+              <div><p className="text-[10px] uppercase tracking-wider text-cocoa-light">Devices</p><p className="mt-1 text-sm text-ink">{(analytics.devices || []).map((device) => `${device.device}: ${deviceTotal ? Math.round(device.visitors / deviceTotal * 100) : 0}%`).join(' · ') || 'No device data yet'}</p></div>
+            </div>
+          </section>
+        </div>
+
+        <section className="border border-ink/10 bg-cream p-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Campaigns</h3>
+          {analytics.campaigns?.length ? <><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-xs"><thead className="border-b border-ink/10 text-[10px] uppercase text-cocoa"><tr><th className="p-2">Source / medium</th><th className="p-2">Campaign</th><th className="p-2">Content</th><th className="p-2 text-right">Visitors</th><th className="p-2 text-right">Product views</th><th className="p-2 text-right">Carts</th><th className="p-2 text-right">Checkouts</th></tr></thead><tbody className="divide-y divide-ink/5">{analytics.campaigns.map((campaign, index) => <tr key={`${campaign.source}-${campaign.medium}-${campaign.campaign}-${campaign.content}-${index}`}><td className="p-2">{campaign.source || 'Unknown'}{campaign.medium ? ` / ${campaign.medium}` : ''}</td><td className="p-2">{campaign.campaign}</td><td className="p-2">{campaign.content || '—'}</td><td className="p-2 text-right">{campaign.visitors}</td><td className="p-2 text-right">{campaign.product_views}</td><td className="p-2 text-right">{campaign.add_to_cart}</td><td className="p-2 text-right">{campaign.checkouts}</td></tr>)}</tbody></table></div><p className="mt-2 text-[10px] text-cocoa-light">Orders and revenue are not attributed because existing order records are not linked to visitor acquisition data.</p></> : <p className="text-xs text-cocoa-light">No UTM campaign data recorded in this range.</p>}
+        </section>
 
         <div className="grid gap-6 md:grid-cols-2">
           <div className="border border-ink/10 bg-cream p-5">
@@ -481,20 +557,22 @@ function Dashboard() {
             <p className="text-xs text-cocoa-light">No visitor sessions recorded yet.</p>
           ) : (
             <div className="w-full overflow-x-auto">
-              <table className="w-full min-w-[900px] text-left text-xs">
+              <table className="w-full min-w-[1080px] text-left text-xs">
                 <thead className="border-b border-ink/10 bg-sand/30 uppercase tracking-wider text-[10px] text-cocoa">
                   <tr>
                     <th className="p-2.5">Status</th>
                     <th className="p-2.5">Visitor ID</th>
-                    <th className="p-2.5">IP</th>
+                    <th className="p-2.5">Location</th>
                     <th className="p-2.5">Device</th>
                     <th className="p-2.5">Browser / OS</th>
                     <th className="p-2.5">Page</th>
+                    <th className="p-2.5">Source</th>
                     <th className="p-2.5">Last Seen</th>
+                    <th className="p-2.5">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink/5 text-ink">
-                  {analytics.recent_visitors.slice(0, 10).map((v, i) => (
+                  {analytics.recent_visitors.map((v, i) => (
                     <tr key={`${v.visitor_id}-${i}`} className="hover:bg-sand/20">
                       <td className="p-2.5">
                         <span
@@ -515,29 +593,90 @@ function Dashboard() {
                         </span>
                       </td>
                       <td className="p-2.5 font-mono text-[11px] text-cocoa truncate max-w-[120px]">
-                        {v.visitor_id}
+                        <button type="button" onClick={() => openVisitorDetails(v.visitor_id)} className="underline decoration-ink/20 underline-offset-2 hover:text-ink">{v.visitor_id}</button>
                       </td>
-                      <td className="p-2.5 font-mono text-[11px] text-cocoa">{v.ip}</td>
-                      <td className="p-2.5 font-medium">{v.device_type || 'Desktop'}</td>
+                      <td className="p-2.5 text-cocoa">{v.location || 'Location unavailable'}</td>
+                      <td className="p-2.5 font-medium">{v.device_type || 'Desktop'}{v.device_model && v.device_model !== 'Unknown' ? ` · ${v.device_model}` : ''}</td>
                       <td className="p-2.5 text-cocoa">
                         {v.browser} / {v.operating_system}
                       </td>
                       <td className="p-2.5 font-mono text-[11px] text-ink truncate max-w-[150px]">
                         {v.page}
                       </td>
+                      <td className="p-2.5 text-cocoa">{v.first_touch?.source || 'Unknown'}</td>
                       <td className="p-2.5 text-cocoa-light text-[11px]">
                         {v.last_seen ? new Date(v.last_seen).toLocaleTimeString() : '—'}
                       </td>
+                      <td className="p-2.5"><div className="flex items-center gap-2">
+                        <button type="button" onClick={() => openVisitorDetails(v.visitor_id)} className="text-[10px] font-semibold uppercase tracking-wider underline underline-offset-2">View</button>
+                        <button type="button" onClick={() => openVisitorDetails(v.visitor_id)} className="text-[10px] font-semibold uppercase tracking-wider underline underline-offset-2">Journey</button>
+                        {openMap(v) && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${v.latitude},${v.longitude}`)}`} target="_blank" rel="noopener noreferrer" className="text-[10px] font-semibold uppercase tracking-wider underline underline-offset-2">Map</a>}
+                      </div></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+          <div className="mt-4 flex items-center justify-between border-t border-ink/10 pt-3">
+            <span className="text-[10px] text-cocoa-light">Page {visitorPage + 1} · 20 visitors per page</span>
+            <div className="flex gap-2">
+              <button type="button" disabled={visitorPage === 0 || refreshing} onClick={() => setVisitorPage((page) => Math.max(0, page - 1))} className="border border-ink/15 px-3 py-1.5 text-[10px] uppercase disabled:opacity-40">Previous</button>
+              <button type="button" disabled={!analytics.recent_has_more || refreshing} onClick={() => setVisitorPage((page) => page + 1)} className="border border-ink/15 px-3 py-1.5 text-[10px] uppercase disabled:opacity-40">Next</button>
+            </div>
+          </div>
         </div>
+
+        <section className="border border-ink/10 bg-cream p-5">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink">Location coverage</h3>
+          <p className="text-xs text-cocoa-light">City-level IP geolocation is not configured. Only browser coordinates explicitly marked as permission-granted can appear above; other visitors remain location unavailable.</p>
+        </section>
       </div>
+
+      <Dialog open={visitorDetailOpen} onOpenChange={setVisitorDetailOpen}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto rounded-none border-ink/15 bg-paper">
+          <DialogHeader><DialogTitle className="font-display text-2xl text-ink">Visitor profile &amp; journey</DialogTitle></DialogHeader>
+          {visitorDetailLoading ? <p className="py-8 text-sm text-cocoa">Loading visitor activity…</p> : visitorDetail?.error ? <p className="py-8 text-sm text-terracotta">{visitorDetail.error}</p> : visitorDetail?.visitor && (() => {
+            const person = visitorDetail.visitor
+            const touch = person.first_touch || {}
+            const hasMap = openMap(person)
+            const journey = [...(visitorDetail.events || [])].reverse()
+            return <div className="space-y-6 text-sm">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <DetailItem label="Visitor ID" value={person.visitor_id} />
+                <DetailItem label="Status" value={person.online ? 'Online' : 'Offline'} />
+                <DetailItem label="Approximate location" value={hasMap ? (Number.isFinite(person.location_accuracy) ? `Browser coordinates ±${Math.round(person.location_accuracy)} m` : 'Browser coordinates · accuracy unavailable') : 'Location unavailable'} />
+                <DetailItem label="Device" value={person.device_type} />
+                <DetailItem label="Device model" value={person.device_model || 'Unknown'} />
+                <DetailItem label="Platform" value={[person.platform || person.operating_system, person.platform_version].filter(Boolean).join(' ') || 'Unknown'} />
+                <DetailItem label="Browser / OS" value={`${person.browser} / ${person.operating_system}`} />
+                <DetailItem label="IP Address" value={person.ip_address || 'Unknown'} />
+                <DetailItem label="First seen" value={person.first_seen ? new Date(person.first_seen).toLocaleString() : 'Not available'} />
+                <DetailItem label="Last seen" value={person.last_seen ? new Date(person.last_seen).toLocaleString() : 'Not available'} />
+                <DetailItem label="Sessions / page views (last 90 days)" value={`${person.session_count || 0} / ${person.page_count || 0}`} />
+                <DetailItem label="Currently viewing" value={person.page || 'Not available'} />
+                <DetailItem label="Landing page" value={touch.landing_page || 'Not available'} />
+                <DetailItem label="Traffic source" value={touch.source || 'Unknown'} />
+                <DetailItem label="Referrer" value={touch.referrer || 'Not available'} />
+                <DetailItem label="UTM source / medium" value={[touch.utm_source, touch.medium].filter(Boolean).join(' / ') || 'Not available'} />
+                <DetailItem label="UTM campaign" value={touch.campaign || 'Not available'} />
+                <DetailItem label="UTM content / term" value={[touch.content, touch.term].filter(Boolean).join(' / ') || 'Not available'} />
+              </div>
+              {hasMap && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${person.latitude},${person.longitude}`)}`} target="_blank" rel="noopener noreferrer" className="inline-flex text-xs font-semibold underline underline-offset-4">View on Google Maps · approximate location</a>}
+              <div>
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Journey · latest 100 events</h3>
+                {journey.length ? <ol className="space-y-3 border-l border-ink/15 pl-4">{journey.map((event, index) => <li key={`${event.created_at}-${index}`} className="relative"><span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-mango-dark" /><p className="font-medium text-ink">{event.event_name.replaceAll('_', ' ')}</p><p className="text-xs text-cocoa">{event.page || event.product_slug || event.category_slug || 'Page unavailable'} · {event.created_at ? new Date(event.created_at).toLocaleString() : 'Time unavailable'}</p></li>)}</ol> : <p className="text-xs text-cocoa-light">No visitor events are available.</p>}
+              </div>
+            </div>
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   )
+}
+
+function DetailItem({ label, value }) {
+  return <div className="min-w-0 border border-ink/10 bg-cream p-3"><p className="text-[10px] uppercase tracking-wider text-cocoa-light">{label}</p><p className="mt-1 break-words text-xs text-ink">{value || 'Not available'}</p></div>
 }
 
 /* --------- Product Editor Modal --------- */

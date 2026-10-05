@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { trackVisitorEvent } from '@/lib/visitorAnalytics'
 
 function WAIcon({ className = 'h-4 w-4' }) {
   return (
@@ -118,6 +119,7 @@ export default function Navbar({ navigate, settings, initialCategories, wishCoun
   const handleSearchSubmit = (e) => {
     e.preventDefault()
     if (searchQuery.trim()) {
+      trackVisitorEvent('search_performed')
       setSearchOpen(false)
       nav(`/search?q=${encodeURIComponent(searchQuery.trim())}`)
       setSearchQuery('')

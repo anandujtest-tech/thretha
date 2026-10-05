@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
+import { isIP } from 'node:net'
 import { v2 as cloudinary } from 'cloudinary'
 import { serveMedia, cloudinaryEnabled } from '../../../lib/storage.js'
 import { sendLoginOtp } from '../../../lib/email.js'
@@ -207,6 +208,117 @@ function requireAuth(request) {
   } catch {
     return null
   }
+}
+
+const VISITOR_EVENT_NAMES = new Set([
+  'page_view', 'category_view', 'product_view', 'checkout_started',
+  'quick_view', 'add_to_cart', 'remove_from_cart', 'search_performed', 'location_shared',
+])
+const CLIENT_VISITOR_EVENT_NAMES = new Set(['quick_view', 'add_to_cart', 'remove_from_cart', 'search_performed', 'location_shared'])
+
+function normalizeVisitorFirstTouch(value) {
+  const source = value && typeof value.source === 'string' ? value.source.slice(0, 80) : 'Unknown'
+  let referrer = ''
+  try {
+    if (typeof value?.referrer === 'string' && value.referrer) {
+      const url = new URL(value.referrer)
+      referrer = url.origin.slice(0, 300)
+    }
+  } catch {}
+  return {
+    source,
+    referrer,
+    landing_page: typeof value?.landing_page === 'string' && value.landing_page.startsWith('/') ? value.landing_page.slice(0, 300) : '',
+    utm_source: String(value?.utm_source || '').slice(0, 120),
+    medium: String(value?.medium || '').slice(0, 120),
+    campaign: String(value?.campaign || '').slice(0, 120),
+    content: String(value?.content || '').slice(0, 120),
+    term: String(value?.term || '').slice(0, 120),
+  }
+}
+
+async function recordVisitorActivity(database, request, body, requestedEvent) {
+  const visitorId = String(body.visitor_id || '').slice(0, 100)
+  if (!visitorId) return json({ error: 'Visitor ID required' }, 400)
+
+  const eventName = VISITOR_EVENT_NAMES.has(requestedEvent) ? requestedEvent : 'page_view'
+  const page = String(body.page || '/').slice(0, 500)
+  const productSlug = typeof body.product_slug === 'string' ? body.product_slug.slice(0, 200) : null
+  const categorySlug = typeof body.category_slug === 'string' ? body.category_slug.slice(0, 200) : null
+  const latitude = Number.isFinite(body.latitude) && body.latitude >= -90 && body.latitude <= 90 ? body.latitude : null
+  const longitude = Number.isFinite(body.longitude) && body.longitude >= -180 && body.longitude <= 180 ? body.longitude : null
+  const accuracy = Number.isFinite(body.location_accuracy) && body.location_accuracy > 0 && body.location_accuracy <= 100000 ? body.location_accuracy : null
+  const requestedPermission = ['granted', 'denied_or_unavailable', 'not_requested'].includes(body.location_permission)
+    ? body.location_permission
+    : 'not_requested'
+  const locationPermission = eventName === 'location_shared' && requestedPermission === 'granted' && latitude !== null && longitude !== null
+    ? 'granted'
+    : requestedPermission === 'granted' ? 'denied_or_unavailable' : requestedPermission
+  const now = new Date()
+  // Use platform/CDN client-IP headers first, then the forwarded chain used by
+  // the deployment proxy. Never accept an address from the request body.
+  const forwardedIp = (request.headers.get('x-forwarded-for') || '').split(',')[0]?.trim()
+  const ipCandidates = [
+    request.headers.get('cf-connecting-ip'),
+    request.headers.get('x-vercel-forwarded-for'),
+    request.headers.get('x-real-ip'),
+    forwardedIp,
+  ]
+  const ip = ipCandidates.map((value) => value?.trim()).find((value) => value && isIP(value)) || 'unknown'
+  const sessionId = String(body.session_id || 'legacy-session').slice(0, 100)
+  const firstTouch = normalizeVisitorFirstTouch(body.first_touch)
+  const browser = String(body.browser || 'Unknown').slice(0, 50)
+  const operatingSystem = String(body.operating_system || 'Unknown').slice(0, 50)
+  const clientHint = (name) => {
+    const value = request.headers.get(name)?.trim().replace(/^"|"$/g, '')
+    return value && value !== '?0' && value.toLowerCase() !== 'unknown' ? value.slice(0, 80) : null
+  }
+  const userAgent = request.headers.get('user-agent') || ''
+  const hintedModel = clientHint('sec-ch-ua-model')
+  const deviceModel = hintedModel || (/iphone/i.test(userAgent) ? 'iPhone' : /ipad/i.test(userAgent) ? 'iPad' : null)
+  const mobileHint = request.headers.get('sec-ch-ua-mobile')?.trim()
+  const deviceType = mobileHint === '?1' ? 'Mobile' : mobileHint === '?0' ? 'Desktop' : String(body.device_type || 'Unknown').slice(0, 50)
+  const platformVersion = clientHint('sec-ch-ua-platform-version')
+  const platform = clientHint('sec-ch-ua-platform')
+  const locationUpdate = eventName === 'location_shared' && ['granted', 'denied_or_unavailable'].includes(body.location_permission)
+    ? {
+        latitude: { $literal: latitude },
+        longitude: { $literal: longitude },
+        location_accuracy: { $literal: accuracy },
+        location_permission: { $literal: locationPermission },
+      }
+    : {}
+
+  await database.collection('visitor_events').insertOne({
+    id: uuidv4(), visitor_id: visitorId, session_id: sessionId, event_name: eventName,
+    page, product_slug: productSlug, category_slug: categorySlug,
+    device_type: deviceType, browser, operating_system: operatingSystem,
+    first_touch: firstTouch, latitude, longitude, location_accuracy: accuracy,
+    location_permission: locationPermission, created_at: now, last_seen: now,
+  })
+
+  await database.collection('visitor_sessions').updateOne({ visitor_id: visitorId }, [
+    { $set: {
+      id: { $ifNull: ['$id', { $literal: uuidv4() }] },
+      visitor_id: { $literal: visitorId },
+      ip: ip === 'unknown' ? { $ifNull: ['$ip', { $literal: 'unknown' }] } : { $literal: ip },
+      page: { $literal: page },
+      product_slug: { $literal: productSlug },
+      device_type: { $literal: deviceType },
+      browser: { $literal: browser },
+      operating_system: { $literal: operatingSystem },
+      ...(deviceModel ? { device_model: { $literal: deviceModel } } : {}),
+      ...(platformVersion ? { platform_version: { $literal: platformVersion } } : {}),
+      ...(platform ? { client_hint_platform: { $literal: platform } } : {}),
+      ...locationUpdate,
+      last_seen: { $literal: now },
+      first_seen: { $ifNull: ['$first_seen', { $literal: now }] },
+      first_touch: { $ifNull: ['$first_touch', { $literal: firstTouch }] },
+    } },
+  ], { upsert: true })
+  return json({ ok: true }, 200, {
+    'Accept-CH': 'Sec-CH-UA-Mobile, Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version, Sec-CH-UA-Model',
+  })
 }
 
 const IMG = (u, w = 900) => `${u}?auto=format&fit=crop&w=${w}&q=80`
@@ -489,257 +601,237 @@ async function handleRoute(request, { params }) {
     if (route === '/analytics/visit' && method === 'POST') {
       try {
         const body = await request.json().catch(() => ({}))
-
-        const visitorId = String(body.visitor_id || '').slice(0, 100)
-        const page = String(body.page || '/').slice(0, 500)
-        const productSlug = body.product_slug
-          ? String(body.product_slug).slice(0, 200)
-          : null
-          const latitude =
-  typeof body.latitude === 'number' && Number.isFinite(body.latitude)
-    ? body.latitude
-    : null
-
-const longitude =
-  typeof body.longitude === 'number' && Number.isFinite(body.longitude)
-    ? body.longitude
-    : null
-
-const locationAccuracy =
-  typeof body.location_accuracy === 'number' &&
-  Number.isFinite(body.location_accuracy)
-    ? body.location_accuracy
-    : null
-
-const locationPermission =
-  ['granted', 'denied_or_unavailable', 'not_requested'].includes(
-    body.location_permission
-  )
-    ? body.location_permission
-    : 'not_requested'
-        if (!visitorId) {
-          return json({ error: 'Visitor ID required' }, 400)
-        }
-
-
-        const ip =
-          request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-          request.headers.get('x-real-ip') ||
-          'unknown'
-
-        const userAgent =
-          request.headers.get('user-agent') || 'unknown'
-const deviceType = String(body.device_type || 'Unknown').slice(0, 50)
-const browser = String(body.browser || 'Unknown').slice(0, 50)
-const operatingSystem = String(body.operating_system || 'Unknown').slice(0, 50)
-
-        const now = new Date()
-
-await database.collection('visitor_events').insertOne({
-  id: uuidv4(),
-  visitor_id: visitorId,
-  ip,
-  page,
-  product_slug: productSlug,
-  user_agent: userAgent,
-  device_type: deviceType,
-  browser,
-  operating_system: operatingSystem,
-  latitude,
-  longitude,
-  location_accuracy: locationAccuracy,
-  location_permission: locationPermission,
-  created_at: now,
-  last_seen: now,
-})
-await database.collection('visitor_sessions').updateOne(
-  { visitor_id: visitorId },
-  {
-    $set: {
-      ip,
-      page,
-      product_slug: productSlug,
-      user_agent: userAgent,
-      device_type: deviceType,
-      browser,
-      operating_system: operatingSystem,
-      latitude,
-      longitude,
-      location_accuracy: locationAccuracy,
-      location_permission: locationPermission,
-      last_seen: now,
-    },
-    $setOnInsert: {
-      id: uuidv4(),
-      visitor_id: visitorId,
-      first_seen: now,
-    },
-  },
-  { upsert: true }
-)
-        return json({ ok: true })
+        const pageEvents = new Set(['page_view', 'category_view', 'product_view', 'checkout_started'])
+        if (body.event_name && !pageEvents.has(body.event_name)) return json({ error: 'Unsupported page event' }, 400)
+        return await recordVisitorActivity(database, request, body, body.event_name)
       } catch (err) {
         console.error('Visitor analytics error:', err)
         return json({ ok: false }, 500)
       }
     }
-// ===== VISITOR HEARTBEAT =====
-if (route === '/analytics/heartbeat' && method === 'POST') {
-  try {
-    const body = await request.json().catch(() => ({}))
-
-    const visitorId = String(body.visitor_id || '').slice(0, 100)
-
-    if (!visitorId) {
-      return json({ error: 'Visitor ID required' }, 400)
-    }
-
-    const ip =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-      request.headers.get('x-real-ip') ||
-      'unknown'
-
-    const now = new Date()
-
-    await database.collection('visitor_sessions').updateOne(
-      { visitor_id: visitorId },
-      {
-        $set: {
-          ip,
-          page: String(body.page || '/').slice(0, 500),
-          last_seen: now,
-        },
+    if (route === '/analytics/event' && method === 'POST') {
+      try {
+        const body = await request.json().catch(() => ({}))
+        if (!CLIENT_VISITOR_EVENT_NAMES.has(body.event_name)) {
+          return json({ error: 'Unsupported analytics event' }, 400)
+        }
+        return await recordVisitorActivity(database, request, body, body.event_name)
+      } catch (err) {
+        console.error('Visitor event error:', err)
+        return json({ ok: false }, 500)
       }
-    )
-
-    return json({ ok: true })
-  } catch (err) {
-    console.error('Visitor heartbeat error:', err)
-    return json({ ok: false }, 500)
-  }
-}
-        // ===== VISITOR ANALYTICS - ADMIN SUMMARY =====
+    }
+    // ===== VISITOR HEARTBEAT =====
+    if (route === '/analytics/heartbeat' && method === 'POST') {
+      try {
+        const body = await request.json().catch(() => ({}))
+        const visitorId = String(body.visitor_id || '').slice(0, 100)
+        if (!visitorId) return json({ error: 'Visitor ID required' }, 400)
+        await database.collection('visitor_sessions').updateOne(
+          { visitor_id: visitorId },
+          { $set: { page: String(body.page || '/').slice(0, 500), last_seen: new Date() } }
+        )
+        return json({ ok: true })
+      } catch (err) {
+        console.error('Visitor heartbeat error:', err)
+        return json({ ok: false }, 500)
+      }
+    }
+    // ===== ADMIN VISITOR ANALYTICS SUMMARY =====
     if (route === '/admin/analytics' && method === 'GET') {
       try {
-         const authUser = requireAuth(request)
-
-if (!authUser) {
-  return json({ error: 'Unauthorized' }, 401)
-}
+        if (!requireAuth(request)) return json({ error: 'Unauthorized' }, 401)
         const events = database.collection('visitor_events')
+        const sessions = database.collection('visitor_sessions')
         const now = new Date()
-
-        const startOfToday = new Date(now)
-        startOfToday.setHours(0, 0, 0, 0)
-
-        const startOfWeek = new Date(now)
-        startOfWeek.setDate(now.getDate() - now.getDay())
-        startOfWeek.setHours(0, 0, 0, 0)
-
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-
-        const totalVisitors = await events.distinct('visitor_id')
-
-        const todayVisitors = await events.distinct('visitor_id', {
-          created_at: { $gte: startOfToday }
-        })
-
-        const weekVisitors = await events.distinct('visitor_id', {
-          created_at: { $gte: startOfWeek }
-        })
-
-        const monthVisitors = await events.distinct('visitor_id', {
-          created_at: { $gte: startOfMonth }
-        })
-
-        const pageStats = await events.aggregate([
-          {
-            $group: {
-              _id: '$page',
-              views: { $sum: 1 }
-            }
+        const days = Math.min(90, Math.max(1, Number(request.nextUrl.searchParams.get('days')) || 30))
+        const visitorPage = Math.min(100, Math.max(0, Number(request.nextUrl.searchParams.get('page')) || 0))
+        const visitorPageSize = 20
+        const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
+        const today = new Date(now)
+        today.setHours(0, 0, 0, 0)
+        const twoMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000)
+        const normalizeEventStage = {
+          $set: {
+            normalized_event: {
+              $ifNull: ['$event_name', {
+                $switch: {
+                  branches: [
+                    { case: { $regexMatch: { input: { $ifNull: ['$page', ''] }, regex: '^/product/' } }, then: 'product_view' },
+                    { case: { $regexMatch: { input: { $ifNull: ['$page', ''] }, regex: '^/category/' } }, then: 'category_view' },
+                    { case: { $eq: ['$page', '/checkout'] }, then: 'checkout_started' },
+                  ],
+                  default: 'page_view',
+                },
+              }],
+            },
           },
-          { $sort: { views: -1 } },
-          { $limit: 10 }
-        ]).toArray()
+        }
 
-        const productStats = await events.aggregate([
-          {
-            $match: {
-              product_slug: { $ne: null }
-            }
-          },
-          {
-            $group: {
-              _id: '$product_slug',
-              views: { $sum: 1 }
-            }
-          },
-          { $sort: { views: -1 } },
-          { $limit: 10 }
-        ]).toArray()
+        const [eventAnalyticsRows, deviceStats, onlineRows, recentVisitors, newVisitorRows, orderCount] = await Promise.all([
+          events.aggregate([
+            { $match: { created_at: { $gte: start, $lte: now } } }, normalizeEventStage,
+            { $facet: {
+              uniqueVisitors: [{ $group: { _id: '$visitor_id' } }, { $count: 'count' }],
+              funnel: [
+                { $group: { _id: { visitor_id: '$visitor_id', event: '$normalized_event' } } },
+                { $group: { _id: '$_id.event', visitors: { $sum: 1 } } },
+              ],
+              todayVisitors: [{ $match: { created_at: { $gte: today, $lte: now } } }, { $group: { _id: '$visitor_id' } }, { $count: 'count' }],
+              todayPageViews: [{ $match: { created_at: { $gte: today, $lte: now }, normalized_event: { $in: ['page_view', 'category_view', 'product_view'] } } }, { $count: 'count' }],
+              todayProductViews: [{ $match: { created_at: { $gte: today, $lte: now }, normalized_event: 'product_view' } }, { $count: 'count' }],
+              todayCartEvents: [{ $match: { created_at: { $gte: today, $lte: now }, normalized_event: 'add_to_cart' } }, { $count: 'count' }],
+              pages: [{ $match: { normalized_event: { $in: ['page_view', 'category_view', 'product_view'] } } }, { $group: { _id: '$page', views: { $sum: 1 } } }, { $sort: { views: -1 } }, { $limit: 10 }],
+              products: [
+                { $match: { normalized_event: 'product_view', product_slug: { $type: 'string' } } },
+                { $group: { _id: '$product_slug', views: { $sum: 1 } } }, { $sort: { views: -1 } }, { $limit: 10 },
+              ],
+              sources: [
+                { $match: { 'first_touch.source': { $type: 'string' } } },
+                { $group: { _id: { visitor_id: '$visitor_id', source: '$first_touch.source' } } },
+                { $group: { _id: '$_id.source', visitors: { $sum: 1 } } }, { $sort: { visitors: -1 } }, { $limit: 8 },
+              ],
+              campaigns: [
+                { $match: { 'first_touch.campaign': { $type: 'string', $ne: '' } } },
+                { $group: { _id: { visitor_id: '$visitor_id', source: '$first_touch.source', medium: '$first_touch.medium', campaign: '$first_touch.campaign', content: '$first_touch.content' }, events: { $addToSet: '$normalized_event' } } },
+                { $group: {
+                  _id: { source: '$_id.source', medium: '$_id.medium', campaign: '$_id.campaign', content: '$_id.content' },
+                  visitors: { $sum: 1 },
+                  product_views: { $sum: { $cond: [{ $in: ['product_view', '$events'] }, 1, 0] } },
+                  add_to_cart: { $sum: { $cond: [{ $in: ['add_to_cart', '$events'] }, 1, 0] } },
+                  checkouts: { $sum: { $cond: [{ $in: ['checkout_started', '$events'] }, 1, 0] } },
+                } },
+                { $sort: { visitors: -1 } }, { $limit: 10 },
+              ],
+            } },
+          ]).toArray(),
+          sessions.aggregate([
+            { $match: { last_seen: { $gte: start, $lte: now } } },
+            { $group: { _id: { visitor_id: '$visitor_id', device: '$device_type', browser: '$browser', os: '$operating_system' } } },
+            { $group: { _id: '$_id.device', visitors: { $sum: 1 } } },
+            { $sort: { visitors: -1 } }, { $limit: 5 },
+          ]).toArray(),
+          sessions.aggregate([
+            { $match: { last_seen: { $gte: twoMinutesAgo, $lte: now } } },
+            { $group: { _id: '$visitor_id' } }, { $count: 'count' },
+          ]).toArray(),
+          sessions.find({ last_seen: { $gte: start, $lte: now } }, {
+            projection: { _id: 0, id: 1, visitor_id: 1, page: 1, product_slug: 1, device_type: 1, device_model: 1, platform_version: 1, browser: 1, operating_system: 1, latitude: 1, longitude: 1, location_accuracy: 1, location_permission: 1, first_seen: 1, last_seen: 1, first_touch: 1, session_count: 1 },
+          }).sort({ last_seen: -1 }).skip(visitorPage * visitorPageSize).limit(visitorPageSize + 1).toArray(),
+          sessions.aggregate([
+            { $match: { first_seen: { $gte: start, $lte: now } } },
+            { $group: { _id: '$visitor_id' } }, { $count: 'count' },
+          ]).toArray(),
+          database.collection('orders').countDocuments({ created_at: { $gte: today, $lte: now } }),
+        ])
 
-       const sessions = database.collection('visitor_sessions')
-
-const twoMinutesAgo = new Date(
-  now.getTime() - 2 * 60 * 1000
-)
-
-const onlineVisitors = await sessions.distinct('visitor_id', {
-  last_seen: { $gte: twoMinutesAgo }
-})
-
-       const recentVisitors = await sessions.find({})
-  .sort({ last_seen: -1 })
-  .limit(20)
-  .toArray()
+        const eventAnalytics = eventAnalyticsRows[0] || {}
+        const funnel = Object.fromEntries((eventAnalytics.funnel || []).map((row) => [row._id, row.visitors]))
+        const uniqueVisitorCount = eventAnalytics.uniqueVisitors?.[0]?.count || 0
+        const onlineCount = onlineRows[0]?.count || 0
+        const newVisitors = newVisitorRows[0]?.count || 0
+        const locationLabel = (item) => item.location_permission === 'granted' && Number.isFinite(item.latitude) && Number.isFinite(item.longitude)
+          ? (Number.isFinite(item.location_accuracy) ? `Approx. browser location ±${Math.round(item.location_accuracy)} m` : 'Approx. browser location · accuracy unavailable')
+          : 'Location unavailable'
 
         return json({
-          total_visitors: totalVisitors.length,
-          today_visitors: todayVisitors.length,
-          week_visitors: weekVisitors.length,
-          month_visitors: monthVisitors.length,
-          currently_online: onlineVisitors.length,
-
-          pages: pageStats.map((item) => ({
-            page: item._id || '/',
-            views: item.views
+          range_days: days,
+          visitor_page: visitorPage,
+          recent_has_more: recentVisitors.length > visitorPageSize,
+          total_visitors: uniqueVisitorCount,
+          today_visitors: eventAnalytics.todayVisitors?.[0]?.count || 0,
+          today_page_views: eventAnalytics.todayPageViews?.[0]?.count || 0,
+          today_product_views: eventAnalytics.todayProductViews?.[0]?.count || 0,
+          today_carts: eventAnalytics.todayCartEvents?.[0]?.count || 0,
+          today_orders: orderCount,
+          currently_online: onlineCount,
+          new_visitors: newVisitors,
+          returning_visitors: Math.max(0, uniqueVisitorCount - newVisitors),
+          funnel: {
+            visitors: uniqueVisitorCount,
+            product_views: funnel.product_view || 0,
+            add_to_cart: funnel.add_to_cart || 0,
+            checkout_started: funnel.checkout_started || 0,
+            orders: null,
+          },
+          pages: (eventAnalytics.pages || []).map((item) => ({ page: item._id || '/', views: item.views })),
+          products: (eventAnalytics.products || []).map((item) => ({ product_slug: item._id, views: item.views })),
+          traffic_sources: (eventAnalytics.sources || []).map((item) => ({ source: item._id || 'Unknown', visitors: item.visitors })),
+          campaigns: (eventAnalytics.campaigns || []).map((item) => ({ ...item._id, visitors: item.visitors })),
+          devices: deviceStats.map((item) => ({ device: item._id || 'Unknown', visitors: item.visitors })),
+          recent_visitors: recentVisitors.slice(0, visitorPageSize).map((item) => ({
+            id: item.id, visitor_id: item.visitor_id, page: item.page, product_slug: item.product_slug,
+            device_type: item.device_type || 'Unknown', browser: !item.browser || item.browser === 'Browser' ? 'Unknown' : item.browser,
+            device_model: item.device_model || 'Unknown',
+            operating_system: !item.operating_system || item.operating_system === 'OS' ? 'Unknown' : item.operating_system, latitude: item.latitude ?? null,
+            longitude: item.longitude ?? null, location_accuracy: item.location_accuracy ?? null,
+            location_permission: item.location_permission || 'not_requested',
+            location: locationLabel(item), first_touch: item.first_touch || null,
+            first_seen: item.first_seen, last_seen: item.last_seen,
+            session_count: item.session_count || null,
+            online: Boolean(item.last_seen && new Date(item.last_seen) >= twoMinutesAgo),
           })),
-
-          products: productStats.map((item) => ({
-            product_slug: item._id,
-            views: item.views
-          })),
-
-       recent_visitors: recentVisitors.map((item) => ({
-  id: item.id,
-  visitor_id: item.visitor_id,
-  ip: item.ip,
-
-  page: item.page,
-  product_slug: item.product_slug,
-
-  user_agent: item.user_agent,
-  device_type: item.device_type ?? 'Unknown',
-  browser: item.browser ?? 'Unknown',
-  operating_system: item.operating_system ?? 'Unknown',
-
-  latitude: item.latitude ?? null,
-  longitude: item.longitude ?? null,
-  location_accuracy: item.location_accuracy ?? null,
-  location_permission: item.location_permission ?? 'not_requested',
-
-  first_seen: item.first_seen,
-  last_seen: item.last_seen,
-
-  online: item.last_seen
-    ? new Date(item.last_seen) >= twoMinutesAgo
-    : false
-}))
         })
       } catch (err) {
         console.error('Visitor analytics summary error:', err)
         return json({ error: 'Failed to load visitor analytics' }, 500)
+      }
+    }
+    if (route === '/admin/analytics/visitor' && method === 'GET') {
+      try {
+        if (!requireAuth(request)) return json({ error: 'Unauthorized' }, 401)
+        const visitorId = String(request.nextUrl.searchParams.get('visitor_id') || '').slice(0, 100)
+        if (!visitorId) return json({ error: 'Visitor ID required' }, 400)
+        const eventStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+        const [visitor, events, sessionCount, pageCount] = await Promise.all([
+          database.collection('visitor_sessions').findOne({ visitor_id: visitorId }, {
+            projection: { _id: 0, id: 1, visitor_id: 1, ip: 1, page: 1, product_slug: 1, device_type: 1, device_model: 1, platform_version: 1, client_hint_platform: 1, browser: 1, operating_system: 1, latitude: 1, longitude: 1, location_accuracy: 1, location_permission: 1, first_seen: 1, last_seen: 1, first_touch: 1, session_count: 1 },
+          }),
+          database.collection('visitor_events').find({ visitor_id: visitorId, created_at: { $gte: eventStart } }, {
+            projection: { _id: 0, event_name: 1, page: 1, product_slug: 1, category_slug: 1, session_id: 1, created_at: 1, first_touch: 1 },
+          }).sort({ created_at: -1 }).limit(100).toArray(),
+          database.collection('visitor_events').aggregate([
+            { $match: { visitor_id: visitorId, created_at: { $gte: eventStart }, session_id: { $type: 'string' } } },
+            { $group: { _id: '$session_id' } }, { $count: 'count' },
+          ]).toArray(),
+          database.collection('visitor_events').countDocuments({
+            visitor_id: visitorId,
+            created_at: { $gte: eventStart },
+            $or: [
+              { event_name: { $in: ['page_view', 'category_view', 'product_view'] } },
+              { event_name: { $exists: false } },
+            ],
+          }),
+        ])
+        if (!visitor) return json({ error: 'Visitor not found' }, 404)
+        const online = Boolean(visitor.last_seen && new Date(visitor.last_seen) >= new Date(Date.now() - 2 * 60 * 1000))
+        return json({
+          visitor: {
+            id: visitor.id, visitor_id: visitor.visitor_id, page: visitor.page,
+            product_slug: visitor.product_slug, device_type: visitor.device_type || 'Unknown',
+            device_model: visitor.device_model || 'Unknown',
+            platform_version: visitor.platform_version || null,
+            platform: visitor.client_hint_platform || (!visitor.operating_system || visitor.operating_system === 'OS' ? 'Unknown' : visitor.operating_system),
+            browser: !visitor.browser || visitor.browser === 'Browser' ? 'Unknown' : visitor.browser,
+            operating_system: !visitor.operating_system || visitor.operating_system === 'OS' ? 'Unknown' : visitor.operating_system,
+            ip_address: visitor.ip && isIP(visitor.ip) ? visitor.ip : 'Unknown',
+            latitude: visitor.location_permission === 'granted' ? visitor.latitude ?? null : null,
+            longitude: visitor.location_permission === 'granted' ? visitor.longitude ?? null : null,
+            location_accuracy: visitor.location_accuracy ?? null,
+            location_permission: visitor.location_permission || 'not_requested',
+            first_seen: visitor.first_seen, last_seen: visitor.last_seen,
+            session_count: sessionCount[0]?.count || 0,
+            page_count: pageCount, page_count_days: 90, first_touch: visitor.first_touch || null, online,
+          },
+          events: events.map((event) => ({
+            event_name: event.event_name || (String(event.page || '').startsWith('/product/') ? 'product_view' : String(event.page || '').startsWith('/category/') ? 'category_view' : event.page === '/checkout' ? 'checkout_started' : 'page_view'),
+            page: event.page, product_slug: event.product_slug, category_slug: event.category_slug,
+            created_at: event.created_at,
+          })),
+        })
+      } catch (err) {
+        console.error('Visitor detail error:', err)
+        return json({ error: 'Failed to load visitor details' }, 500)
       }
     }
     if (route === '/health' && method === 'GET') return json({ ok: true })

@@ -9,6 +9,7 @@ import { inr, toggleWishlist, inWishlist } from '@/lib/tc'
 import { cn } from '@/lib/utils'
 import { useCart } from './CartContext'
 import FashionImage from './FashionImage'
+import { trackVisitorEvent } from '@/lib/visitorAnalytics'
 
 const QuickViewModal = dynamic(() => import('./QuickViewModal'))
 
@@ -60,6 +61,7 @@ export default function ProductCard({ p, settings, addToCart, editorial = false 
     e.preventDefault()
     e.stopPropagation()
     setQuickOpen(true)
+    trackVisitorEvent('quick_view', { product_slug: p.slug })
   }
 
   if (editorial) return (

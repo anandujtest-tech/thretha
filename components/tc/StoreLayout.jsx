@@ -9,6 +9,7 @@ import Footer from './Footer'
 import MobileNav from './MobileNav'
 import VisitorTracker from './VisitorTracker'
 import PwaInstallPrompt from './PwaInstallPrompt'
+import VisitorLocationPrompt from './VisitorLocationPrompt'
 
 function StoreLayoutInner({ children, initialSettings, initialCategories }) {
   const [settings, setSettings] = useState(initialSettings || null)
@@ -68,6 +69,7 @@ function StoreLayoutInner({ children, initialSettings, initialCategories }) {
           cartCount={cartCount}
         />
         <main id={isHome ? 'homepage-content' : undefined} className={isHome ? '' : 'animate-fade-in pb-16 md:pb-0'}>{children}</main>
+        <VisitorLocationPrompt enabled={settings?.ask_visitor_location === true} />
       </div>
 
       <Footer navigate={navigate} settings={settings} initialCategories={categories} editorial={isHome} />
