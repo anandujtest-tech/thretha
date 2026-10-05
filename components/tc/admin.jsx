@@ -26,6 +26,7 @@ import {
 import PromotionsManager from './admin/PromotionsManager'
 import ShippingDetailsEditor from './admin/ShippingDetailsEditor'
 import OrderNotificationsManager from './admin/OrderNotificationsManager'
+import BrowserPushManager from './admin/BrowserPushManager'
 import CombosManager from './admin/CombosManager'
 import InstagramFeedManager from './admin/InstagramFeedManager'
 import TryOnSettingsManager from './admin/TryOnSettingsManager'
@@ -2509,8 +2510,22 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
   const [tab, setTab] = useState(defaultTab || 'dashboard')
 
   useEffect(() => {
-    if (defaultTab) setTab(defaultTab)
+    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'notifications', 'settings'])
+    const syncTabFromUrl = () => {
+      const requestedTab = new URLSearchParams(window.location.search).get('tab')
+      setTab(validTabs.has(requestedTab) ? requestedTab : (validTabs.has(defaultTab) ? defaultTab : 'dashboard'))
+    }
+    syncTabFromUrl()
+    window.addEventListener('popstate', syncTabFromUrl)
+    return () => window.removeEventListener('popstate', syncTabFromUrl)
   }, [defaultTab])
+
+  const selectTab = (nextTab) => {
+    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'notifications', 'settings'])
+    if (!validTabs.has(nextTab)) return
+    setTab(nextTab)
+    router.push(nextTab === 'dashboard' ? '/admin' : `/admin?tab=${encodeURIComponent(nextTab)}`, { scroll: false })
+  }
 
   useEffect(() => {
     const t = auth.get()
@@ -2572,7 +2587,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
             {nav.map(([id, label, Icon]) => (
               <button
                 key={id}
-                onClick={() => setTab(id)}
+                onClick={() => selectTab(id)}
                 className={cn(
                   'flex w-full items-center gap-3 rounded-none px-3.5 py-3 text-xs uppercase tracking-wider font-medium transition',
                   tab === id
@@ -2612,7 +2627,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
         <div className="flex items-center gap-2">
           <select
             value={tab}
-            onChange={(e) => setTab(e.target.value)}
+            onChange={(e) => selectTab(e.target.value)}
             className="bg-[#1D1B19] border border-white/20 text-xs text-cream px-2 py-1"
           >
             {nav.map(([id, l]) => (
@@ -2640,7 +2655,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
         {tab === 'combos' && <CombosManager />}
         {tab === 'orders' && <Orders />}
         {tab === 'promotions' && <PromotionsManager />}
-        {tab === 'notifications' && <OrderNotificationsManager />}
+        {tab === 'notifications' && <><BrowserPushManager /><OrderNotificationsManager /></>}
         {tab === 'settings' && <SettingsPage />}
       </main>
     </div>
