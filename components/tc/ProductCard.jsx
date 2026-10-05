@@ -1,14 +1,16 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Heart, Sparkles, Video, ArrowRight } from 'lucide-react'
 import { inr, toggleWishlist, inWishlist } from '@/lib/tc'
 import { cn } from '@/lib/utils'
 import { useCart } from './CartContext'
-import QuickViewModal from './QuickViewModal'
 import FashionImage from './FashionImage'
+
+const QuickViewModal = dynamic(() => import('./QuickViewModal'))
 
 export default function ProductCard({ p, settings, addToCart, editorial = false }) {
   const router = useRouter()

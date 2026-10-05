@@ -10,24 +10,29 @@ import MobileNav from './MobileNav'
 import VisitorTracker from './VisitorTracker'
 import PwaInstallPrompt from './PwaInstallPrompt'
 
-function StoreLayoutInner({ children, initialSettings }) {
+function StoreLayoutInner({ children, initialSettings, initialCategories }) {
   const [settings, setSettings] = useState(initialSettings || null)
   const pathname = usePathname()
   const router = useRouter()
-  const { cartCount, wishCount } = useCart()
+  const { cartCount, wishCount, setStoreSettings } = useCart()
   const isHome = pathname === '/'
 
   useEffect(() => {
     let active = true
-    const loadSettings = () => api('/settings').then((current) => { if (active) setSettings(current) }).catch(() => {})
-    if (initialSettings) setSettings(initialSettings)
+    const applySettings = (current) => {
+      if (!active) return
+      setSettings(current)
+      setStoreSettings(current)
+    }
+    const loadSettings = () => api('/settings').then(applySettings).catch(() => {})
+    if (initialSettings) applySettings(initialSettings)
     else loadSettings()
     window.addEventListener('tc-storefront-settings-changed', loadSettings)
     return () => {
       active = false
       window.removeEventListener('tc-storefront-settings-changed', loadSettings)
     }
-  }, [initialSettings])
+  }, [initialSettings, setStoreSettings])
 
   const navigate = (to) => {
     if (to.startsWith('/#')) {
@@ -51,13 +56,14 @@ function StoreLayoutInner({ children, initialSettings }) {
         <Navbar
           navigate={navigate}
           settings={settings}
+          initialCategories={initialCategories}
           wishCount={wishCount}
           cartCount={cartCount}
         />
         <main id={isHome ? 'homepage-content' : undefined} className={isHome ? '' : 'animate-fade-in pb-16 md:pb-0'}>{children}</main>
       </div>
 
-      <Footer navigate={navigate} settings={settings} editorial={isHome} />
+      <Footer navigate={navigate} settings={settings} initialCategories={initialCategories} editorial={isHome} />
 
       {!isHome && <MobileNav
         navigate={navigate}
@@ -70,6 +76,6 @@ function StoreLayoutInner({ children, initialSettings }) {
   )
 }
 
-export default function StoreLayout({ children, initialSettings }) {
-  return <StoreLayoutInner initialSettings={initialSettings}>{children}</StoreLayoutInner>
+export default function StoreLayout({ children, initialSettings, initialCategories }) {
+  return <StoreLayoutInner initialSettings={initialSettings} initialCategories={initialCategories}>{children}</StoreLayoutInner>
 }

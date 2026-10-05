@@ -11,7 +11,7 @@ export default function VisitorTracker() {
     if (!pathname || lastTracked.current === pathname) return
     lastTracked.current = pathname
 
-    const timer = setTimeout(() => {
+    const trackVisit = () => {
       try {
         const key = 'thretha_visitor_id'
         let visitorId = localStorage.getItem(key)
@@ -38,9 +38,19 @@ export default function VisitorTracker() {
           keepalive: true,
         }).catch(() => {})
       } catch {}
-    }, 500)
+    }
+    let idleId
+    let timer
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(trackVisit, { timeout: 2000 })
+    } else {
+      timer = window.setTimeout(trackVisit, 1000)
+    }
 
-    return () => clearTimeout(timer)
+    return () => {
+      if (idleId !== undefined) window.cancelIdleCallback(idleId)
+      window.clearTimeout(timer)
+    }
   }, [pathname])
 
   return null

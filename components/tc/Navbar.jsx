@@ -69,13 +69,13 @@ function AnnouncementBar({ settings }) {
   )
 }
 
-export default function Navbar({ navigate, settings, wishCount = 0, cartCount = 0 }) {
+export default function Navbar({ navigate, settings, initialCategories, wishCount = 0, cartCount = 0 }) {
   const router = useRouter()
   const nav = navigate || ((to) => router.push(to))
   const { user, isAuthenticated, logout } = useAuth()
 
   const [liveSettings, setLiveSettings] = useState(settings || null)
-  const [categories, setCategories] = useState([])
+  const [categories, setCategories] = useState(() => Array.isArray(initialCategories) ? initialCategories : [])
   const [mobileOpen, setMobileOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -121,12 +121,18 @@ export default function Navbar({ navigate, settings, wishCount = 0, cartCount = 
 
   // Dynamically load categories from API
   useEffect(() => {
+    if (Array.isArray(initialCategories)) {
+      setCategories(initialCategories)
+      return
+    }
+    let active = true
     api('/categories')
       .then((cats) => {
-        if (Array.isArray(cats)) setCategories(cats)
+        if (active && Array.isArray(cats)) setCategories(cats)
       })
       .catch(() => {})
-  }, [])
+    return () => { active = false }
+  }, [initialCategories])
 
   const handleSearchSubmit = (e) => {
     e.preventDefault()

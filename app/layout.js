@@ -1,6 +1,10 @@
 import './globals.css'
 import { Providers } from './providers'
 import { SITE_URL, BRAND_NAME } from '@/lib/seo'
+import { Cormorant_Garamond, Inter } from 'next/font/google'
+
+const cormorant = Cormorant_Garamond({ subsets: ['latin'], weight: 'variable', style: ['normal', 'italic'], display: 'swap', variable: '--font-cormorant' })
+const inter = Inter({ subsets: ['latin'], weight: 'variable', display: 'swap', variable: '--font-inter' })
 
 export const metadata = {
   metadataBase: new URL(SITE_URL),
@@ -27,14 +31,8 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${cormorant.variable} ${inter.variable}`}>
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Caveat:wght@400..700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
         <script
           dangerouslySetInnerHTML={{
             __html:

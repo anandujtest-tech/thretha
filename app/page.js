@@ -44,7 +44,7 @@ export default async function HomePage() {
   } catch (error) {
     console.error('Homepage SEO data unavailable:', error)
   }
-  return <StoreLayout initialSettings={initialData?.settings}>
+  return <StoreLayout initialSettings={initialData?.settings} initialCategories={initialData?.categories}>
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(organizationJsonLd(initialData?.settings)) }} />
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(websiteJsonLd()) }} />
     <HomeView initialData={initialData} />

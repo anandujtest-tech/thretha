@@ -612,15 +612,6 @@ export function CartProvider({ children }) {
     }
   }
 
-  // Fetch live store settings (shipping, delivery fees, thresholds)
-  useEffect(() => {
-    api('/settings')
-      .then((s) => {
-        if (s) setSettings(s)
-      })
-      .catch(() => {})
-  }, [])
-
   // Computed Cart Summary
   const cartCount = cart.reduce((sum, item) => sum + (item.quantity || 1), 0)
   const cartSubtotal = cart.reduce(
@@ -704,6 +695,7 @@ export function CartProvider({ children }) {
         deliveryEnabled,
         freeThresholdEnabled,
         deliveryTimeframe,
+        setStoreSettings: setSettings,
         shippingReason,
         coupon,
         setCoupon,
@@ -736,4 +728,3 @@ export function useCart() {
   }
   return context
 }
-

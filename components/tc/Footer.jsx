@@ -14,16 +14,22 @@ function WAIcon({ className = 'h-4 w-4' }) {
   )
 }
 
-export default function Footer({ navigate, settings, editorial = false }) {
-  const [categories, setCategories] = useState([])
+export default function Footer({ navigate, settings, initialCategories, editorial = false }) {
+  const [categories, setCategories] = useState(() => Array.isArray(initialCategories) ? initialCategories : [])
 
   useEffect(() => {
+    if (Array.isArray(initialCategories)) {
+      setCategories(initialCategories)
+      return
+    }
+    let active = true
     api('/categories')
       .then((cats) => {
-        if (Array.isArray(cats)) setCategories(cats)
+        if (active && Array.isArray(cats)) setCategories(cats)
       })
       .catch(() => {})
-  }, [])
+    return () => { active = false }
+  }, [initialCategories])
 
   const waNum = (settings?.whatsapp || '918301824696').replace(/[^0-9]/g, '')
   const waUrl = `https://wa.me/${waNum}`
