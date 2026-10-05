@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -56,6 +57,7 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
   const { available: tryOnAvailable, settings: tryOnSettings } = useTryOnAvailability('product', p?.ai_tryon_enabled)
   const [err, setErr] = useState(false)
   const [activeMedia, setActiveMedia] = useState(0)
+  const [mainImageFailed, setMainImageFailed] = useState(false)
   const [size, setSize] = useState('')
   const [qty, setQty] = useState(1)
   const [orderOpen, setOrderOpen] = useState(false)
@@ -85,11 +87,47 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
 
   useEffect(() => {
     if (!slug) return
+    let active = true
+    const applyProduct = (product) => {
+      if (!active) return
+      setP(product)
+      setSaved(inWishlist(product.slug))
+      setActiveColour(product.colour || product.colours?.[0] || 'Standard')
+      setActiveMedia(0)
+      setMainImageFailed(false)
+
+      const explicitSizes = (product.sizes || []).filter((item) => item && item.size)
+      const isMulti = explicitSizes.length > 1 || (explicitSizes.length === 1 && explicitSizes[0].size !== 'Free Size')
+      setSize(isMulti ? explicitSizes.find((item) => item.available)?.size || '' : explicitSizes[0]?.size || 'Free Size')
+    }
+    const loadRelated = (product) => {
+      if (!product.category_id) return
+      const request = categorySlug
+        ? api(`/products?category=${encodeURIComponent(categorySlug)}`)
+        : api('/products')
+      request.then((list) => {
+        if (!active) return
+        setRelated((list || [])
+          .filter((item) => item.category_id === product.category_id && item.id !== product.id)
+          .slice(0, 4))
+      }).catch(() => {})
+    }
+
     setErr(false)
-    if (!initialProduct || initialProduct.slug !== slug) setP(null)
+    const serverProduct = initialProduct?.slug === slug ? initialProduct : null
+    setP(serverProduct)
+    setRelated([])
     setSizeError(false)
     setFeedbackToast(null)
     setQty(1)
+    setActiveMedia(0)
+    setMainImageFailed(false)
+
+    if (serverProduct) {
+      applyProduct(serverProduct)
+      loadRelated(serverProduct)
+      return () => { active = false }
+    }
 
     api(`/products/${encodeURIComponent(slug)}`)
       .catch(() => api(`/product/${encodeURIComponent(slug)}`))
@@ -97,39 +135,12 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
         if (!d || d.error || !d.id) {
           throw new Error('Product not found')
         }
-        setP(d)
-        setSaved(inWishlist(d.slug))
-        setActiveColour(d.colour || d.colours?.[0] || 'Standard')
-
-        // Determine if product has explicit multiple sizes or is Free Size
-        const explicitSizes = (d.sizes || []).filter((s) => s && s.size)
-        const isMulti =
-          explicitSizes.length > 1 ||
-          (explicitSizes.length === 1 && explicitSizes[0].size !== 'Free Size')
-
-        if (isMulti) {
-          // Explicit sizing: require customer selection (or first available size)
-          const firstAvail = explicitSizes.find((s) => s.available)
-          setSize(firstAvail?.size || '')
-        } else {
-          // Free size: automatically set Free Size without requiring manual selection
-          setSize(explicitSizes[0]?.size || 'Free Size')
-        }
-
-        // Fetch related items from same category
-        if (d.category_id) {
-          api('/products')
-            .then((list) => {
-              const rel = (list || [])
-                .filter((item) => item.category_id === d.category_id && item.id !== d.id)
-                .slice(0, 4)
-              setRelated(rel)
-            })
-            .catch(() => {})
-        }
+        applyProduct(d)
+        loadRelated(d)
       })
-      .catch(() => { if (!initialProduct) setErr(true) })
-  }, [slug, initialProduct])
+      .catch(() => { if (!initialProduct || initialProduct.slug !== slug) setErr(true) })
+    return () => { active = false }
+  }, [slug, initialProduct, categorySlug])
 
   if (err) {
     return (
@@ -361,14 +372,17 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
                 playsInline
               />
             ) : media[activeMedia]?.url ? (
-              <img
-                src={media[activeMedia].url}
+              <Image
+                key={media[activeMedia].url}
+                src={mainImageFailed ? '/api/media/file/seed-01.jpg' : media[activeMedia].url}
                 alt={p.name}
-                onError={(e) => {
-                  e.currentTarget.onerror = null
-                  e.currentTarget.src = '/api/media/file/seed-01.jpg'
+                onError={() => {
+                  if (!mainImageFailed) setMainImageFailed(true)
                 }}
-                className="h-full w-full object-cover"
+                fill
+                priority
+                sizes="(max-width: 1023px) calc(100vw - 2rem), 48vw"
+                className="object-cover"
               />
             ) : (
               <div className="grid h-full place-items-center bg-sand/30 p-8 text-center">
@@ -401,7 +415,7 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
               {media.map((m, idx) => (
                 <button
                   key={m.id || idx}
-                  onClick={() => setActiveMedia(idx)}
+                  onClick={() => { setActiveMedia(idx); setMainImageFailed(false) }}
                   className={cn(
                     'relative h-20 w-16 shrink-0 overflow-hidden rounded-sm border-2 transition',
                     activeMedia === idx ? 'border-mango shadow-md scale-105' : 'border-ink/15 opacity-70 hover:opacity-100'
@@ -411,8 +425,10 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
                     <div className="grid h-full w-full place-items-center bg-ink text-cream">
                       <Video className="h-4 w-4 text-gold-shimmer" />
                     </div>
+                  ) : m.url ? (
+                    <Image src={m.url} alt="" fill sizes="64px" className="object-cover" />
                   ) : (
-                    <img src={m.url} alt="" className="h-full w-full object-cover" />
+                    <div className="h-full w-full bg-sand/30" />
                   )}
                 </button>
               ))}

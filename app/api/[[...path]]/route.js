@@ -936,11 +936,10 @@ const onlineVisitors = await sessions.distinct('visitor_id', {
       const cats = await database.collection('categories')
         .find({ active: true }).sort({ display_order: 1 }).toArray()
       // attach counts
-      const out = []
-      for (const c of cats) {
+      const out = await Promise.all(cats.map(async (c) => {
         const count = await database.collection('products').countDocuments({ category_id: c.id, active: true })
-        out.push({ ...strip(c), product_count: count })
-      }
+        return { ...strip(c), product_count: count }
+      }))
       return json(out)
     }
 

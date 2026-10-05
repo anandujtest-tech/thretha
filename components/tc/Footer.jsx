@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { MapPin, PhoneCall, Mail, Instagram, ArrowUpRight } from 'lucide-react'
-import { api } from '@/lib/tc'
 
 function WAIcon({ className = 'h-4 w-4' }) {
   return (
@@ -18,17 +17,7 @@ export default function Footer({ navigate, settings, initialCategories, editoria
   const [categories, setCategories] = useState(() => Array.isArray(initialCategories) ? initialCategories : [])
 
   useEffect(() => {
-    if (Array.isArray(initialCategories)) {
-      setCategories(initialCategories)
-      return
-    }
-    let active = true
-    api('/categories')
-      .then((cats) => {
-        if (active && Array.isArray(cats)) setCategories(cats)
-      })
-      .catch(() => {})
-    return () => { active = false }
+    setCategories(Array.isArray(initialCategories) ? initialCategories : [])
   }, [initialCategories])
 
   const waNum = (settings?.whatsapp || '918301824696').replace(/[^0-9]/g, '')

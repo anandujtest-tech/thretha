@@ -83,11 +83,21 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
   }, [])
 
   useEffect(() => {
+    const hasFilters = Object.values(filters).some(Boolean)
+    if (Array.isArray(initialProducts) && sort === 'newest' && !q && !hasFilters) {
+      setProducts(initialProducts)
+      setLoading(false)
+      return
+    }
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, sort, filters])
+  }, [path, sort, filters, q, initialProducts])
 
   useEffect(() => {
+    if (initialCategory) {
+      setCat(initialCategory)
+      return
+    }
     if (catSlug) {
       api('/categories')
         .then((cs) => setCat(cs.find((c) => c.slug === catSlug)))
@@ -95,7 +105,7 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
     } else {
       setCat(null)
     }
-  }, [catSlug])
+  }, [catSlug, initialCategory])
 
   const title = isNew ? 'Just Dropped' : cat ? cat.name : 'The Complete Edit'
   const sub = isNew

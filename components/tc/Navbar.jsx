@@ -27,7 +27,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
-import { api } from '@/lib/tc'
 import { cn } from '@/lib/utils'
 
 function WAIcon({ className = 'h-4 w-4' }) {
@@ -89,15 +88,7 @@ export default function Navbar({ navigate, settings, initialCategories, wishCoun
 
   // Sync / load settings
   useEffect(() => {
-    if (settings) {
-      setLiveSettings(settings)
-    } else {
-      api('/settings')
-        .then((s) => {
-          if (s) setLiveSettings(s)
-        })
-        .catch(() => {})
-    }
+    setLiveSettings(settings || null)
   }, [settings])
 
   const combosEnabled = liveSettings?.combos_enabled !== false
@@ -121,17 +112,7 @@ export default function Navbar({ navigate, settings, initialCategories, wishCoun
 
   // Dynamically load categories from API
   useEffect(() => {
-    if (Array.isArray(initialCategories)) {
-      setCategories(initialCategories)
-      return
-    }
-    let active = true
-    api('/categories')
-      .then((cats) => {
-        if (active && Array.isArray(cats)) setCategories(cats)
-      })
-      .catch(() => {})
-    return () => { active = false }
+    setCategories(Array.isArray(initialCategories) ? initialCategories : [])
   }, [initialCategories])
 
   const handleSearchSubmit = (e) => {

@@ -12,6 +12,7 @@ import PwaInstallPrompt from './PwaInstallPrompt'
 
 function StoreLayoutInner({ children, initialSettings, initialCategories }) {
   const [settings, setSettings] = useState(initialSettings || null)
+  const [categories, setCategories] = useState(() => Array.isArray(initialCategories) ? initialCategories : [])
   const pathname = usePathname()
   const router = useRouter()
   const { cartCount, wishCount, setStoreSettings } = useCart()
@@ -25,14 +26,20 @@ function StoreLayoutInner({ children, initialSettings, initialCategories }) {
       setStoreSettings(current)
     }
     const loadSettings = () => api('/settings').then(applySettings).catch(() => {})
+    const applyCategories = (current) => {
+      if (active && Array.isArray(current)) setCategories(current)
+    }
+    const loadCategories = () => api('/categories').then(applyCategories).catch(() => {})
     if (initialSettings) applySettings(initialSettings)
     else loadSettings()
+    if (Array.isArray(initialCategories)) applyCategories(initialCategories)
+    else loadCategories()
     window.addEventListener('tc-storefront-settings-changed', loadSettings)
     return () => {
       active = false
       window.removeEventListener('tc-storefront-settings-changed', loadSettings)
     }
-  }, [initialSettings, setStoreSettings])
+  }, [initialSettings, initialCategories, setStoreSettings])
 
   const navigate = (to) => {
     if (to.startsWith('/#')) {
@@ -56,14 +63,14 @@ function StoreLayoutInner({ children, initialSettings, initialCategories }) {
         <Navbar
           navigate={navigate}
           settings={settings}
-          initialCategories={initialCategories}
+          initialCategories={categories}
           wishCount={wishCount}
           cartCount={cartCount}
         />
         <main id={isHome ? 'homepage-content' : undefined} className={isHome ? '' : 'animate-fade-in pb-16 md:pb-0'}>{children}</main>
       </div>
 
-      <Footer navigate={navigate} settings={settings} initialCategories={initialCategories} editorial={isHome} />
+      <Footer navigate={navigate} settings={settings} initialCategories={categories} editorial={isHome} />
 
       {!isHome && <MobileNav
         navigate={navigate}

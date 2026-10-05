@@ -1,5 +1,4 @@
 import { notFound, permanentRedirect } from 'next/navigation'
-import StoreLayout from '@/components/tc/StoreLayout'
 import ProductDetail from '@/components/tc/ProductDetail'
 import ErrorBoundary from '@/components/tc/ErrorBoundary'
 import { getCategoryById, getProduct } from '@/lib/seoData'
@@ -34,11 +33,11 @@ export default async function ProductPageRoute({ params }) {
   const trail = [{ name: 'Home', path: '/' }, { name: 'Shop', path: '/shop' }]
   if (category) trail.push({ name: category.name, path: `/category/${category.slug}` })
   if (product) trail.push({ name: product.name, path: `/product/${product.slug}` })
-  return <StoreLayout>
+  return <>
     {product && <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(productJsonLd(product)) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd(trail)) }} />
     </>}
-    <ErrorBoundary sectionName="Product Details"><ProductDetail slug={slug} initialProduct={product} categorySlug={category?.slug} /></ErrorBoundary>
-  </StoreLayout>
+    <ErrorBoundary sectionName="Product Details"><ProductDetail key={slug} slug={slug} initialProduct={product} categorySlug={category?.slug} /></ErrorBoundary>
+  </>
 }

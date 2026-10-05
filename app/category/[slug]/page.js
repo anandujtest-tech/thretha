@@ -1,6 +1,5 @@
 import { notFound, permanentRedirect } from 'next/navigation'
 import Link from 'next/link'
-import StoreLayout from '@/components/tc/StoreLayout'
 import ProductGrid from '@/components/tc/ProductGrid'
 import { getCategory, getProducts } from '@/lib/seoData'
 import { breadcrumbJsonLd, categoryMetadata, jsonLd, pageMetadata } from '@/lib/seo'
@@ -31,11 +30,11 @@ export default async function CategoryPage({ params }) {
     if (error?.digest?.startsWith('NEXT_')) throw error
     console.error('Category SEO data unavailable:', error)
   }
-  return <StoreLayout>
+  return <>
     {category && <>
       <nav aria-label="Breadcrumb" className="container pt-6 text-xs"><Link href="/">Home</Link> / <Link href="/collections">Collections</Link> / <span>{category.name}</span></nav>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd([{ name: 'Home', path: '/' }, { name: 'Collections', path: '/collections' }, { name: category.name, path: `/category/${slug}` }])) }} />
     </>}
-    <ProductGrid path={`/category/${slug}`} initialCategory={category} initialProducts={products} />
-  </StoreLayout>
+    <ProductGrid key={slug} path={`/category/${slug}`} initialCategory={category} initialProducts={products} />
+  </>
 }
