@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { api } from '@/lib/tc'
 import { useCart } from './CartContext'
@@ -10,14 +10,51 @@ import MobileNav from './MobileNav'
 import VisitorTracker from './VisitorTracker'
 import PwaInstallPrompt from './PwaInstallPrompt'
 import VisitorLocationPrompt from './VisitorLocationPrompt'
+import PushNotificationsOptIn from './PushNotificationsOptIn'
 
 function StoreLayoutInner({ children, initialSettings, initialCategories }) {
   const [settings, setSettings] = useState(initialSettings || null)
   const [categories, setCategories] = useState(() => Array.isArray(initialCategories) ? initialCategories : [])
+  const [homeScrolled, setHomeScrolled] = useState(false)
+  const [pushBellEligible, setPushBellEligible] = useState(false)
+  const notificationTargetRef = useRef(null)
+  const notificationScrollSentinelRef = useRef(null)
   const pathname = usePathname()
   const router = useRouter()
   const { cartCount, wishCount, setStoreSettings } = useCart()
   const isHome = pathname === '/'
+
+  useEffect(() => {
+    if (!isHome) {
+      setHomeScrolled(false)
+      return undefined
+    }
+    const sentinel = notificationScrollSentinelRef.current
+    if (!sentinel) return undefined
+    if (!('IntersectionObserver' in window)) {
+      let frame = 0
+      const updateScrollState = () => {
+        if (frame) return
+        frame = window.requestAnimationFrame(() => {
+          frame = 0
+          const next = sentinel.getBoundingClientRect().top < 0
+          setHomeScrolled((current) => current === next ? current : next)
+        })
+      }
+      window.addEventListener('scroll', updateScrollState, { passive: true })
+      updateScrollState()
+      return () => {
+        window.removeEventListener('scroll', updateScrollState)
+        if (frame) window.cancelAnimationFrame(frame)
+      }
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      const next = !entry.isIntersecting
+      setHomeScrolled((current) => current === next ? current : next)
+    }, { threshold: 0 })
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [isHome])
 
   useEffect(() => {
     let active = true
@@ -59,20 +96,29 @@ function StoreLayoutInner({ children, initialSettings, initialCategories }) {
   return (
     <div className={`min-h-screen bg-paper text-ink flex flex-col justify-between selection:bg-mango-light selection:text-ink ${isHome ? 'fashion-store' : ''}`}>
       <VisitorTracker />
+      {isHome && <PushNotificationsOptIn
+        notificationTargetRef={notificationTargetRef}
+        docked={homeScrolled && pushBellEligible}
+        onAvailabilityChange={setPushBellEligible}
+      />}
       <div>
         <PwaInstallPrompt enabled={isHome && settings?.pwa?.install_prompt_enabled !== false} />
         <Navbar
           navigate={navigate}
           settings={settings}
-          initialCategories={categories}
+          initialCategories={initialCategories}
+          resolvedCategories={categories}
           wishCount={wishCount}
           cartCount={cartCount}
+          notificationTargetRef={isHome && pushBellEligible ? notificationTargetRef : null}
+          notificationBellDocked={isHome && pushBellEligible && homeScrolled}
+          notificationScrollSentinelRef={isHome ? notificationScrollSentinelRef : null}
         />
         <main id={isHome ? 'homepage-content' : undefined} className={isHome ? '' : 'animate-fade-in pb-16 md:pb-0'}>{children}</main>
-        <VisitorLocationPrompt enabled={settings?.ask_visitor_location === true} />
+        <VisitorLocationPrompt enabled={settings?.ask_visitor_location === true} autoRequest={isHome} />
       </div>
 
-      <Footer navigate={navigate} settings={settings} initialCategories={categories} editorial={isHome} />
+      <Footer navigate={navigate} settings={settings} initialCategories={initialCategories} resolvedCategories={categories} editorial={isHome} />
 
       {!isHome && <MobileNav
         navigate={navigate}

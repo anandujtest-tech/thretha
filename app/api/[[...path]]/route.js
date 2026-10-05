@@ -95,9 +95,21 @@ import {
   getTryOnAnalyticsSummary,
   getTryOnProvider,
 } from '../../../lib/tryon.js'
+import {
+  cleanCampaignInput,
+  getNextPushOccurrence,
+  getPushSubscriberCooldownMinutes,
+  getVapidPublicKey,
+  isValidPushSubscriberCooldownMinutes,
+  isWebPushConfigured,
+  normalizePushSchedule,
+  normalizePushSubscription,
+} from '../../../lib/pushNotifications.js'
+import { ensurePushIndexes, processPushQueue, suppressDuePushCampaigns } from '../../../lib/pushScheduler.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const JWT_SECRET = process.env.JWT_SECRET || 'thretha_dev_secret'
 
@@ -597,6 +609,209 @@ async function handleRoute(request, { params }) {
     }
 
     const database = await connectToMongo()
+    // ===== BROWSER WEB PUSH =====
+    if (route === '/push/config' && method === 'GET') {
+      const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { browser_notifications: 1 } })
+      const configured = isWebPushConfigured()
+      return json({ enabled: settings?.browser_notifications?.enabled === true && configured, configured, vapidPublicKey: configured ? getVapidPublicKey() : '' }, 200, { 'Cache-Control': 'no-store, max-age=0' })
+    }
+    if (route === '/push/subscribe' && method === 'POST') {
+      try {
+        const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { browser_notifications: 1 } })
+        if (settings?.browser_notifications?.enabled !== true) return json({ error: 'Browser notifications are currently disabled.' }, 403)
+        if (!isWebPushConfigured()) return json({ error: 'Browser notifications are not configured yet.' }, 503)
+        const ipHash = crypto.createHash('sha256').update(getClientIp(request)).digest('hex')
+        const rate = await checkRateLimit(database, `push_subscribe_${ipHash}`, 20, 60)
+        if (!rate.allowed) return json({ error: 'Too many subscription attempts. Please try again later.' }, 429)
+        const body = await request.json().catch(() => ({}))
+        const subscription = normalizePushSubscription(body.subscription)
+        const now = new Date()
+        await ensurePushIndexes(database)
+        await database.collection('push_subscriptions').updateOne(
+          { endpoint: subscription.endpoint },
+          {
+            $set: { keys: subscription.keys, active: true, updated_at: now, last_failure: null },
+            $setOnInsert: { created_at: now, last_success_at: null, success_count: 0, failure_count: 0 },
+          },
+          { upsert: true },
+        )
+        return json({ ok: true })
+      } catch (error) {
+        return json({ error: error.message || 'Unable to save this push subscription.' }, 400)
+      }
+    }
+    if (route === '/push/unsubscribe' && method === 'POST') {
+      try {
+        const body = await request.json().catch(() => ({}))
+        const subscription = normalizePushSubscription(body.subscription)
+        await database.collection('push_subscriptions').updateOne(
+          { endpoint: subscription.endpoint, 'keys.p256dh': subscription.keys.p256dh, 'keys.auth': subscription.keys.auth },
+          { $set: { active: false, updated_at: new Date(), unsubscribed_at: new Date() } },
+        )
+        return json({ ok: true })
+      } catch (error) {
+        return json({ error: error.message || 'Unable to unsubscribe this browser.' }, 400)
+      }
+    }
+    if (route === '/admin/push' && method === 'GET') {
+      if (!requireAuth(request)) return json({ error: 'Unauthorized' }, 401)
+      await ensurePushIndexes(database)
+      const now = new Date()
+      const indiaDate = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).map((part) => [part.type, part.value]))
+      const today = new Date(`${indiaDate.year}-${indiaDate.month}-${indiaDate.day}T00:00:00+05:30`)
+      const [setting, subscriberCount, scheduledCount, sentToday, campaigns] = await Promise.all([
+        database.collection('settings').findOne({ id: 'global' }, { projection: { browser_notifications: 1, notifications: 1 } }),
+        database.collection('push_subscriptions').countDocuments({ active: true }),
+        database.collection('notification_campaigns').countDocuments({ status: { $in: ['scheduled', 'active', 'paused', 'sending'] } }),
+        database.collection('notification_deliveries').countDocuments({ status: 'sent', completed_at: { $gte: today } }),
+        database.collection('notification_campaigns').find({}, { projection: { _id: 0 } }).sort({ created_at: -1 }).limit(100).toArray(),
+      ])
+      return json({
+        enabled: setting?.browser_notifications?.enabled === true,
+        configured: isWebPushConfigured(),
+        cooldown_minutes: getPushSubscriberCooldownMinutes(setting?.notifications?.push_subscriber_cooldown_minutes),
+        subscriber_count: subscriberCount,
+        scheduled_count: scheduledCount,
+        sent_today: sentToday,
+        campaigns,
+      })
+    }
+    if (route === '/admin/push/settings' && method === 'PUT') {
+      if (!requireAuth(request)) return json({ error: 'Unauthorized' }, 401)
+      const body = await request.json().catch(() => ({}))
+      const hasEnabled = typeof body.enabled === 'boolean'
+      const hasCooldown = Object.hasOwn(body, 'cooldown_minutes')
+      if (!hasEnabled && !hasCooldown) return json({ error: 'Choose a notification setting to update.' }, 400)
+      if (hasCooldown && !isValidPushSubscriberCooldownMinutes(body.cooldown_minutes)) {
+        return json({ error: 'Cooldown must be a whole number from 0 to 10080 minutes.' }, 400)
+      }
+      if (hasEnabled && body.enabled && !isWebPushConfigured()) return json({ error: 'Set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, and VAPID_SUBJECT before enabling browser push.' }, 400)
+      const settingsCollection = database.collection('settings')
+      const current = await settingsCollection.findOne({ id: 'global' }, { projection: { browser_notifications: 1, notifications: 1 } })
+      const previous = current?.browser_notifications || {}
+      const now = new Date()
+      const update = { updated_at: now }
+      let browserNotifications = previous
+      if (hasEnabled) {
+        if (body.enabled && previous.enabled !== true && previous.disabled_at) await suppressDuePushCampaigns(database, now)
+        browserNotifications = body.enabled
+          ? { ...previous, enabled: true, disabled_at: null }
+          : { ...previous, enabled: false, disabled_at: previous.enabled === false && previous.disabled_at ? previous.disabled_at : now }
+        update.browser_notifications = browserNotifications
+      }
+      if (hasCooldown) update['notifications.push_subscriber_cooldown_minutes'] = body.cooldown_minutes
+      await settingsCollection.updateOne({ id: 'global' }, { $set: update }, { upsert: true })
+      if (hasEnabled && !body.enabled) await suppressDuePushCampaigns(database, now)
+      return json({
+        enabled: hasEnabled ? browserNotifications.enabled : previous.enabled === true,
+        configured: isWebPushConfigured(),
+        cooldown_minutes: getPushSubscriberCooldownMinutes(hasCooldown ? body.cooldown_minutes : current?.notifications?.push_subscriber_cooldown_minutes),
+      })
+    }
+    if (route === '/admin/push/campaigns' && method === 'POST') {
+      const admin = requireAuth(request)
+      if (!admin) return json({ error: 'Unauthorized' }, 401)
+      if (!isWebPushConfigured()) return json({ error: 'Configure VAPID environment variables before creating campaigns.' }, 400)
+      const body = await request.json().catch(() => ({}))
+      let content
+      let sendMode
+      let schedule
+      try {
+        content = cleanCampaignInput(body)
+        sendMode = body.send_mode || 'now'
+        schedule = normalizePushSchedule(sendMode, body.schedule)
+      } catch (error) {
+        return json({ error: error.message || 'Unable to create notification.' }, 400)
+      }
+      const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { browser_notifications: 1 } })
+      if (schedule.type === 'now' && settings?.browser_notifications?.enabled !== true) return json({ error: 'Enable Browser Notifications before sending.' }, 409)
+      const now = new Date()
+      const nextRun = schedule.type === 'once' ? schedule.scheduled_at : schedule.type === 'now' ? now : getNextPushOccurrence(schedule, new Date(now.getTime() - 1))
+      if (!nextRun) return json({ error: 'This schedule has no upcoming delivery.' }, 400)
+      const campaign = {
+        id: uuidv4(), ...content, audience: 'all_active', schedule,
+        status: schedule.type === 'repeat' ? 'active' : 'scheduled',
+        next_run_at: nextRun,
+        created_by: String(admin.email || admin.sub || 'admin').slice(0, 160),
+        created_at: now, updated_at: now,
+        targeted_count: 0, success_count: 0, failed_count: 0,
+        run_count: 0,
+      }
+      try {
+        await ensurePushIndexes(database)
+        await database.collection('notification_campaigns').insertOne(campaign)
+      } catch {
+        return json({ error: 'Unable to create notification.' }, 500)
+      }
+
+      if (schedule.type !== 'now') {
+        return json({ ok: true, status: 'scheduled', campaign: { ...campaign, _id: undefined } }, 201)
+      }
+
+      let result
+      try {
+        result = await processPushQueue(database, new Date(), { campaignId: campaign.id })
+      } catch {
+        return json({
+          error: 'The notification was created but immediate delivery could not be completed. It remains queued for Cron retry.',
+          campaignId: campaign.id,
+          retryable: true,
+        }, 503)
+      }
+      const response = {
+        ok: result.status !== 'failed',
+        campaignId: campaign.id,
+        status: ['sending', 'claimed_elsewhere'].includes(result.status) ? 'processing' : result.status,
+        targeted: result.targeted || 0,
+        sent: result.sent || 0,
+        failed: result.failed || 0,
+        skipped: result.skipped || 0,
+        remaining: result.remaining === true || result.status === 'sending',
+      }
+      if (result.status === 'failed') {
+        return json({ ...response, error: 'Immediate delivery could not be completed for all eligible subscribers.' }, 502)
+      }
+      return json(response)
+    }
+    if (parts[0] === 'admin' && parts[1] === 'push' && parts[2] === 'campaigns' && parts[3] && method === 'PUT') {
+      const admin = requireAuth(request)
+      if (!admin) return json({ error: 'Unauthorized' }, 401)
+      const body = await request.json().catch(() => ({}))
+      try {
+        const content = cleanCampaignInput(body)
+        const sendMode = body.send_mode || body.schedule?.type || 'once'
+        const schedule = normalizePushSchedule(sendMode, body.schedule)
+        const nextRun = schedule.type === 'once' ? schedule.scheduled_at : getNextPushOccurrence(schedule, new Date(Date.now() - 1))
+        if (!nextRun) return json({ error: 'This schedule has no upcoming delivery.' }, 400)
+        const result = await database.collection('notification_campaigns').updateOne(
+          { id: parts[3], status: { $in: ['scheduled', 'active', 'paused'] } },
+          { $set: { ...content, schedule, next_run_at: nextRun, status: schedule.type === 'repeat' ? 'active' : 'scheduled', updated_at: new Date(), edited_by: String(admin.email || admin.sub || 'admin').slice(0, 160) }, $unset: { current_run_key: '', run_cursor: '', claim_expires_at: '', paused_from_status: '' } },
+        )
+        if (!result.matchedCount) return json({ error: 'Campaign not found or is already sending/completed.' }, 404)
+        return json({ ok: true })
+      } catch (error) {
+        return json({ error: error.message || 'Unable to edit notification.' }, 400)
+      }
+    }
+    if (parts[0] === 'admin' && parts[1] === 'push' && parts[2] === 'campaigns' && parts[3] && parts[4] === 'action' && method === 'POST') {
+      if (!requireAuth(request)) return json({ error: 'Unauthorized' }, 401)
+      const body = await request.json().catch(() => ({}))
+      const campaigns = database.collection('notification_campaigns')
+      const campaign = await campaigns.findOne({ id: parts[3] })
+      if (!campaign) return json({ error: 'Campaign not found.' }, 404)
+      const now = new Date()
+      if (body.action === 'pause' && ['scheduled', 'active'].includes(campaign.status)) {
+        await campaigns.updateOne({ id: campaign.id, status: campaign.status }, { $set: { status: 'paused', paused_from_status: campaign.status, updated_at: now }, $unset: { claim_expires_at: '' } })
+      } else if (body.action === 'resume' && campaign.status === 'paused') {
+        const status = campaign.schedule?.type === 'repeat' ? 'active' : 'scheduled'
+        const nextRun = campaign.schedule?.type === 'repeat' && campaign.next_run_at <= now ? getNextPushOccurrence(campaign.schedule, now) : campaign.next_run_at
+        if (!nextRun) return json({ error: 'This campaign has no remaining scheduled run.' }, 409)
+        await campaigns.updateOne({ id: campaign.id, status: 'paused' }, { $set: { status, next_run_at: nextRun, updated_at: now }, $unset: { paused_from_status: '' } })
+      } else if (body.action === 'cancel' && ['scheduled', 'active', 'paused'].includes(campaign.status)) {
+        await campaigns.updateOne({ id: campaign.id, status: campaign.status }, { $set: { status: 'cancelled', cancelled_at: now, updated_at: now }, $unset: { next_run_at: '', claim_expires_at: '' } })
+      } else return json({ error: 'That action is not available for this campaign.' }, 409)
+      return json({ ok: true })
+    }
     // ===== VISITOR ANALYTICS =====
     if (route === '/analytics/visit' && method === 'POST') {
       try {
@@ -839,6 +1054,7 @@ async function handleRoute(request, { params }) {
     // Helper to format settings consistently with robust shipping fields
     const normalizeSettingsDoc = (s) => {
       const stripped = strip(s) || {}
+      delete stripped.browser_notifications
       stripped.combos_enabled = s?.combos_enabled !== false
 
       const ship = s?.shipping || {}

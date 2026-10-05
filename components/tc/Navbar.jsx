@@ -69,7 +69,7 @@ function AnnouncementBar({ settings }) {
   )
 }
 
-export default function Navbar({ navigate, settings, initialCategories, wishCount = 0, cartCount = 0 }) {
+export default function Navbar({ navigate, settings, initialCategories, resolvedCategories, wishCount = 0, cartCount = 0, notificationTargetRef = null, notificationBellDocked = false, notificationScrollSentinelRef = null }) {
   const router = useRouter()
   const nav = navigate || ((to) => router.push(to))
   const { user, isAuthenticated, logout } = useAuth()
@@ -111,10 +111,12 @@ export default function Navbar({ navigate, settings, initialCategories, wishCoun
 
   const waNum = (liveSettings?.whatsapp || '918301824696').replace(/[^0-9]/g, '')
 
-  // Dynamically load categories from API
+  // Keep the first render tied to the server prop. StoreLayout may load the
+  // fallback category list in its own effect before this subtree hydrates.
   useEffect(() => {
-    setCategories(Array.isArray(initialCategories) ? initialCategories : [])
-  }, [initialCategories])
+    if (Array.isArray(initialCategories)) setCategories(initialCategories)
+    else if (Array.isArray(resolvedCategories)) setCategories(resolvedCategories)
+  }, [initialCategories, resolvedCategories])
 
   const handleSearchSubmit = (e) => {
     e.preventDefault()
@@ -129,6 +131,7 @@ export default function Navbar({ navigate, settings, initialCategories, wishCoun
   return (
     <>
       <AnnouncementBar settings={settings} />
+      <span ref={notificationScrollSentinelRef || undefined} aria-hidden="true" className="block h-px w-px -mb-px" />
 
       <header className="sticky top-0 z-40 w-full border-b border-ink/10 bg-paper/90 backdrop-blur-xl transition-all duration-300">
         <div className="container px-3 sm:px-6 lg:px-8 flex h-14 sm:h-20 items-center justify-between">
@@ -499,8 +502,22 @@ export default function Navbar({ navigate, settings, initialCategories, wishCoun
               )}
             </button>
 
+            {notificationTargetRef && (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'h-11 shrink-0 overflow-hidden transition-[width] duration-[400ms] ease-in-out motion-reduce:transition-none',
+                  notificationBellDocked ? 'w-11' : 'w-0'
+                )}
+                style={{ marginLeft: 0 }}
+              >
+                <span className="block h-11 w-11" />
+              </span>
+            )}
+
             {/* Wishlist Button */}
             <button
+              ref={notificationTargetRef || undefined}
               type="button"
               aria-label="Wishlist"
               onClick={() => nav('/wishlist')}
