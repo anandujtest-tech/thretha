@@ -154,6 +154,13 @@ function json(data, status = 200, extraHeaders = {}) {
   return cors(response)
 }
 
+function getCheckoutAvailability(settings) {
+  return {
+    pay_online_enabled: settings?.checkout?.pay_online_enabled !== false,
+    whatsapp_order_enabled: settings?.checkout?.whatsapp_order_enabled !== false,
+  }
+}
+
 function apiError({
   code = ERROR_CODES.INTERNAL_ERROR,
   message = null,
@@ -1090,6 +1097,7 @@ async function handleRoute(request, { params }) {
       stripped.pwa = {
         install_prompt_enabled: s?.pwa?.install_prompt_enabled !== false,
       }
+      stripped.checkout = getCheckoutAvailability(s)
       return stripped
     }
 
@@ -1519,6 +1527,12 @@ async function handleRoute(request, { params }) {
 
       if (!items.length) {
         return json({ error: 'Shopping bag is empty' }, 400)
+      }
+
+      const checkoutSettings = await database.collection('settings').findOne({ id: 'global' }, { projection: { checkout: 1 } })
+      const checkoutAvailability = getCheckoutAvailability(checkoutSettings)
+      if (!checkoutAvailability.pay_online_enabled) {
+        return json({ error: 'Pay Online is currently unavailable. Please choose another checkout method.', code: 'CHECKOUT_METHOD_DISABLED', checkout: checkoutAvailability }, 409)
       }
 
       const authCustomer = await getCustomerFromRequest(request, database)
@@ -2004,6 +2018,24 @@ async function handleRoute(request, { params }) {
     if (route === '/orders' && method === 'POST') {
       const body = await request.json()
       const { customer, item, items: incomingItems, coupon_code, payment_method = 'WHATSAPP_CONCIERGE' } = body
+
+      const checkoutSettings = await database.collection('settings').findOne({ id: 'global' }, { projection: { checkout: 1 } })
+      const checkoutAvailability = getCheckoutAvailability(checkoutSettings)
+      const requestsOnlinePayment = payment_method === 'CASHFREE' || payment_method === 'RAZORPAY'
+      const requestsWhatsAppOrder = payment_method === 'WHATSAPP_CONCIERGE'
+      if (!requestsOnlinePayment && !requestsWhatsAppOrder) {
+        return json({ error: 'Choose a supported checkout method.' }, 400)
+      }
+      if ((requestsOnlinePayment && !checkoutAvailability.pay_online_enabled)
+        || (requestsWhatsAppOrder && !checkoutAvailability.whatsapp_order_enabled)) {
+        return json({
+          error: requestsOnlinePayment
+            ? 'Pay Online is currently unavailable. Please choose another checkout method.'
+            : 'WhatsApp ordering is currently unavailable. Please choose another checkout method.',
+          code: 'CHECKOUT_METHOD_DISABLED',
+          checkout: checkoutAvailability,
+        }, 409)
+      }
 
       // Server-side authoritative validation of customer address & contact
       const addressValidation = validateAddress(customer, { requireDistrict: false })
@@ -3447,6 +3479,27 @@ async function handleRoute(request, { params }) {
       }
       if (route === '/admin/settings' && method === 'PUT') {
         const b = await request.json()
+        let checkoutUpdate
+
+        if (b.checkout !== undefined) {
+          if (!b.checkout || typeof b.checkout !== 'object' || Array.isArray(b.checkout)) {
+            return json({ error: 'Checkout payment settings must be an object.' }, 400)
+          }
+          for (const key of ['pay_online_enabled', 'whatsapp_order_enabled']) {
+            if (b.checkout[key] !== undefined && typeof b.checkout[key] !== 'boolean') {
+              return json({ error: 'Checkout payment settings must be enabled or disabled.' }, 400)
+            }
+          }
+          const currentSettings = await database.collection('settings').findOne({ id: 'global' }, { projection: { checkout: 1 } })
+          const currentMethods = getCheckoutAvailability(currentSettings)
+          checkoutUpdate = {
+            pay_online_enabled: b.checkout.pay_online_enabled ?? currentMethods.pay_online_enabled,
+            whatsapp_order_enabled: b.checkout.whatsapp_order_enabled ?? currentMethods.whatsapp_order_enabled,
+          }
+          if (!checkoutUpdate.pay_online_enabled && !checkoutUpdate.whatsapp_order_enabled) {
+            return json({ error: 'At least one checkout method must remain enabled.' }, 400)
+          }
+        }
 
         if (b.pwa?.install_prompt_enabled !== undefined && typeof b.pwa.install_prompt_enabled !== 'boolean') {
           return json({ error: 'PWA install prompt setting must be enabled or disabled.' }, 400)
@@ -3476,6 +3529,7 @@ async function handleRoute(request, { params }) {
 
         const update = { ...b, updated_at: new Date() }
         delete update.id; delete update._id
+        if (checkoutUpdate) update.checkout = checkoutUpdate
         const expectedDefaultCourier = b.shipping?.default_courier
         if (b.shipping && typeof b.shipping === 'object') {
           // Write shipping fields independently so a stale/partial settings

@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Video,
   AlertCircle,
+  ArrowRight,
 } from 'lucide-react'
 import {
   Accordion,
@@ -31,19 +32,9 @@ import { cn } from '@/lib/utils'
 import { useCart } from './CartContext'
 import ProductCard from './ProductCard'
 import SizeGuideModal from './SizeGuideModal'
-import OrderModal from './OrderModal'
 import FlyingCartAnimation from './FlyingCartAnimation'
 import VirtualTryOnModal from './VirtualTryOnModal'
 import { useTryOnAvailability } from './TryOnSettingsContext'
-
-function WAIcon({ className = 'h-4 w-4' }) {
-  return (
-    <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21" />
-      <path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1" />
-    </svg>
-  )
-}
 
 export default function ProductDetail({ navigate, settings, slug, addToCart, initialProduct, categorySlug }) {
   const router = useRouter()
@@ -60,7 +51,6 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
   const [mainImageFailed, setMainImageFailed] = useState(false)
   const [size, setSize] = useState('')
   const [qty, setQty] = useState(1)
-  const [orderOpen, setOrderOpen] = useState(false)
   const [saved, setSaved] = useState(false)
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false)
   const [related, setRelated] = useState([])
@@ -194,6 +184,7 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
   const existingCartItem = cartItems.find(
     (item) => String(item.product_id) === String(p.id) && item.size === (selectedSize || 'Free Size')
   )
+  const isInBag = Boolean(existingCartItem)
   const currentQtyInCart = existingCartItem ? Math.max(0, Number(existingCartItem.quantity) || 0) : 0
   const isAlreadyAtMaxStock = currentQtyInCart >= availableStock
 
@@ -593,29 +584,24 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
           {/* Order Actions */}
           <div className="space-y-3 pt-4">
             <Button
-              onClick={() => setOrderOpen(true)}
-              disabled={soldOut || availableStock <= 0}
-              className="w-full rounded-none bg-[#25D366] py-6 text-xs uppercase tracking-[0.22em] text-white hover:bg-[#1eb457] shadow-lg font-semibold"
-            >
-              <WAIcon className="mr-2 h-4 w-4" />
-              Order Piece on WhatsApp
-            </Button>
-
-            <Button
               ref={addToBagButtonRef}
-              onClick={handleAddToCart}
-              disabled={soldOut || availableStock <= 0 || isAddingToCart}
-              aria-label="Add to Shopping Bag"
+              onClick={isInBag ? () => nav('/cart') : handleAddToCart}
+              disabled={!isInBag && (soldOut || availableStock <= 0 || isAddingToCart)}
+              aria-label={isInBag ? 'View Bag' : 'Add to Shopping Bag'}
               className={cn(
                 'w-full rounded-none py-6 text-xs uppercase tracking-[0.22em] transition-all duration-300 font-semibold shadow-md min-h-[50px] active:scale-[0.99]',
-                soldOut || availableStock <= 0
+                !isInBag && (soldOut || availableStock <= 0)
                   ? 'bg-ink/40 text-cream cursor-not-allowed'
                   : addedToast
                   ? 'bg-emerald-800 text-cream'
                   : 'bg-ink text-cream hover:bg-cocoa-dark'
               )}
             >
-              {isAddingToCart ? (
+              {isInBag ? (
+                <span className="flex items-center justify-center gap-2">
+                  <ShoppingBag className="h-4 w-4" /> VIEW BAG <ArrowRight className="h-4 w-4" />
+                </span>
+              ) : isAddingToCart ? (
                 <span className="flex items-center gap-2">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-cream border-t-transparent" />
                   Adding to Bag…
@@ -712,16 +698,6 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
       {/* Sizing Guide Modal */}
       <SizeGuideModal open={sizeGuideOpen} onOpenChange={setSizeGuideOpen} />
 
-      {/* WhatsApp Checkout Dialog */}
-      <OrderModal
-        open={orderOpen}
-        onOpenChange={setOrderOpen}
-        product={p}
-        size={size}
-        qty={qty}
-        settings={settings}
-      />
-
       {/* Related Products Grid */}
       {related.length > 0 && (
         <section className="mt-16 sm:mt-24 border-t border-ink/10 pt-12">
@@ -764,19 +740,21 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
         </div>
         <button
           type="button"
-          disabled={soldOut || availableStock <= 0 || isAddingToCart}
-          onClick={handleAddToCart}
-          aria-label="Add to Shopping Bag"
+          disabled={!isInBag && (soldOut || availableStock <= 0 || isAddingToCart)}
+          onClick={isInBag ? () => nav('/cart') : handleAddToCart}
+          aria-label={isInBag ? 'View Bag' : 'Add to Shopping Bag'}
           className={cn(
             'flex-1 py-3 px-4 text-[11px] font-sans uppercase tracking-[0.18em] font-semibold text-center transition-all duration-300 active:scale-[0.98]',
-            soldOut || availableStock <= 0
+            !isInBag && (soldOut || availableStock <= 0)
               ? 'bg-ink/40 text-cream cursor-not-allowed'
               : addedToast
               ? 'bg-emerald-800 text-cream'
               : 'bg-ink text-cream hover:bg-cocoa-dark shadow-md'
           )}
         >
-          {soldOut || availableStock <= 0
+          {isInBag
+            ? 'View Bag →'
+            : soldOut || availableStock <= 0
             ? 'Sold Out'
             : isAddingToCart
             ? 'Adding…'

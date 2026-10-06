@@ -9,15 +9,6 @@ import { inr, api } from '@/lib/tc'
 import { cn } from '@/lib/utils'
 import { useCart, getItemKey } from './CartContext'
 
-function WAIcon({ className = 'h-4 w-4' }) {
-  return (
-    <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21" />
-      <path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1" />
-    </svg>
-  )
-}
-
 export default function CartPage({
   navigate,
   settings,
@@ -63,7 +54,6 @@ export default function CartPage({
   const combosEnabled = liveSettings?.combos_enabled !== false
   const hasDisabledCombos = !combosEnabled && cart.some((it) => it.is_combo)
 
-  const waNumber = (liveSettings?.whatsapp || '918301824696').replace(/[^0-9]/g, '')
 
   const applyCoupon = async (e) => {
     e.preventDefault()
@@ -92,47 +82,6 @@ export default function CartPage({
   const removeCoupon = () => {
     setCoupon(null)
     setCouponError('')
-  }
-
-  const orderOnWhatsApp = () => {
-    if (!cart.length || !waNumber) return
-    if (hasDisabledCombos) {
-      alert('Curated ensembles in your bag are currently unavailable for purchase. Please remove them to proceed.')
-      return
-    }
-
-    const lines = cart.map((item, index) => {
-      const itemTotal = item.price * item.quantity
-      return [
-        `*${index + 1}. ${item.product_name}*`,
-        `   Size: ${item.size || 'Free Size'}`,
-        `   Colour: ${item.colour || '—'}`,
-        `   Quantity: ${item.quantity}`,
-        `   Price: ${inr(item.price)}`,
-        `   Subtotal: ${inr(itemTotal)}`,
-        '',
-      ].join('\n')
-    })
-
-    const message = [
-      '✨ *THRETHA COUTURE — BAG ORDER REQUEST*',
-      '',
-      'Hello Thretha Team! 👋',
-      '',
-      '*I would like to place an order for the following pieces in my bag:*',
-      '',
-      ...lines,
-      '━━━━━━━━━━━━━━━━━━━━',
-      `*ESTIMATED BAG TOTAL: ${inr(cartTotal)}*`,
-      '━━━━━━━━━━━━━━━━━━━━',
-      '',
-      'Please confirm piece availability, custom fittings, and delivery details.',
-    ].join('\n')
-
-    window.open(
-      `https://wa.me/${waNumber}?text=${encodeURIComponent(message)}`,
-      '_blank'
-    )
   }
 
   if (!isLoaded) {
@@ -616,15 +565,6 @@ export default function CartPage({
             >
               <span>{hasDisabledCombos ? 'Remove Unavailable Combos' : 'Proceed to Checkout'}</span>
               <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-
-            {/* Secondary Action: Order on WhatsApp */}
-            <Button
-              onClick={orderOnWhatsApp}
-              className="w-full rounded-none bg-[#25D366] py-6 text-xs uppercase tracking-[0.22em] text-white hover:bg-[#1eb457] shadow-sm font-semibold"
-            >
-              <WAIcon className="mr-2 h-4 w-4" />
-              Order on WhatsApp
             </Button>
 
             <Button

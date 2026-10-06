@@ -8,16 +8,14 @@ import { inr, toggleWishlist, inWishlist } from '@/lib/tc'
 import { useCart } from './CartContext'
 import FashionImage from './FashionImage'
 import SizeGuideModal from './SizeGuideModal'
-import OrderModal from './OrderModal'
 
-export default function QuickViewModal({ product, open, onOpenChange, navigate, addToCart, settings, returnFocusRef }) {
+export default function QuickViewModal({ product, open, onOpenChange, navigate, addToCart, returnFocusRef }) {
   const router = useRouter()
   const { cart } = useCart()
   const sizes = (product?.sizes || []).filter(s => s?.size)
   const [size, setSize] = useState(() => sizes.find(s => s.available)?.size || (sizes.length ? '' : 'Free Size'))
   const [quantity, setQuantity] = useState(1)
   const [activeMedia, setActiveMedia] = useState(() => Math.max(0, (product?.media || []).filter(m => m.url).findIndex(m => m.is_primary)))
-  const [orderOpen, setOrderOpen] = useState(false)
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false)
   const [saved, setSaved] = useState(() => inWishlist(product?.slug))
   const [message, setMessage] = useState('')
@@ -111,12 +109,11 @@ export default function QuickViewModal({ product, open, onOpenChange, navigate, 
             {sizes.length > 0 && <fieldset className="quick-shop-sizes" disabled={adding}><legend>Size</legend><button className="quick-shop-size-guide" type="button" onClick={() => setSizeGuideOpen(true)}><Ruler size={14} /> Size guide</button><div>{sizes.map(s => <button type="button" key={s.size} disabled={!s.available || !stock} aria-pressed={size === s.size} aria-label={`Size ${s.size}${!s.available || !stock ? ' — unavailable' : ''}`} onClick={() => { setSize(s.size); setQuantity(1); setMessage('') }}>{s.size}</button>)}</div></fieldset>}
             <div className="quick-shop-quantity"><span>Quantity</span><div><button type="button" aria-label="Decrease quantity" disabled={quantity <= 1 || adding} onClick={() => setQuantity(q => Math.max(1, q - 1))}><Minus size={15} /></button><output aria-live="polite">{Math.min(quantity, Math.max(1, remaining))}</output><button type="button" aria-label="Increase quantity" disabled={quantity >= remaining || !availableSize || adding} onClick={() => setQuantity(q => Math.min(remaining, q + 1))}><Plus size={15} /></button></div></div>
             <p className="quick-shop-status" role="status">{message || (!stock ? 'Sold out' : !remaining ? 'Available quantity is already in your bag.' : !availableSize ? 'Select an available size.' : 'Available to add to your bag')}</p>
-            <div className="quick-shop-actions"><button className="quick-shop-add" type="button" onClick={add} disabled={!stock || !remaining || !availableSize || adding}><ShoppingBag size={17} />{adding ? 'Adding…' : !stock ? 'Sold out' : 'Add to bag'}</button><button className="quick-shop-whatsapp" type="button" disabled={!stock || !availableSize || adding} onClick={() => { if (validSelection()) setOrderOpen(true) }}>Order on WhatsApp</button><button className="quick-shop-details" type="button" onClick={() => { onOpenChange(false); (navigate || router.push)(`/product/${product.slug}`) }}>View full details <ArrowRight size={15} /></button></div>
+            <div className="quick-shop-actions">{cartQuantity > 0 ? <button className="quick-shop-add" type="button" onClick={() => { onOpenChange(false); (navigate || router.push)('/cart') }}><ShoppingBag size={17} />View bag</button> : <button className="quick-shop-add" type="button" onClick={add} disabled={!stock || !remaining || !availableSize || adding}><ShoppingBag size={17} />{adding ? 'Adding…' : !stock ? 'Sold out' : 'Add to bag'}</button>}<button className="quick-shop-details" type="button" onClick={() => { onOpenChange(false); (navigate || router.push)(`/product/${product.slug}`) }}>View full details <ArrowRight size={15} /></button></div>
           </div>
         </div>
       </DialogContent>
     </Dialog>
     <SizeGuideModal open={sizeGuideOpen} onOpenChange={setSizeGuideOpen} />
-    <OrderModal open={orderOpen} onOpenChange={setOrderOpen} product={product} size={size} qty={Math.min(quantity, Math.max(1, remaining))} settings={settings} />
   </>
 }

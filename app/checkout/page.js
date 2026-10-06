@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StoreLayout from '@/components/tc/StoreLayout'
@@ -62,7 +62,7 @@ function Field({
   const inputId = id || `checkout-${label.toLowerCase().replace(/[^a-z0-9]/g, '-')}`
 
   return (
-    <div className={className}>
+    <div className={cn('min-w-0', className)}>
       <Label htmlFor={inputId} className="text-[11px] font-semibold uppercase tracking-wider text-ink/75 flex items-center justify-between">
         <span>{label} {required && <span className="text-coral">*</span>}</span>
       </Label>
@@ -79,7 +79,7 @@ function Field({
         aria-invalid={hasError}
         aria-describedby={hasError ? `${inputId}-error` : undefined}
         className={cn(
-          'mt-1 rounded-none bg-cream text-xs focus-visible:ring-mango/20 transition',
+          'mt-1 min-w-0 rounded-none bg-cream text-xs focus-visible:ring-mango/20 transition',
           disabled && 'bg-sand/30 text-cocoa cursor-not-allowed border-ink/15',
           hasError
             ? 'border-coral focus-visible:border-coral bg-coral-light/10'
@@ -229,7 +229,37 @@ function CheckoutInner() {
     }
   }, [user])
 
-  const [paymentMethod, setPaymentMethod] = useState('WHATSAPP') // 'CASHFREE' or 'WHATSAPP'
+  const [paymentMethod, setPaymentMethod] = useState('CASHFREE')
+  const [checkoutMethods, setCheckoutMethods] = useState({ pay_online_enabled: true, whatsapp_order_enabled: true })
+  const [checkoutMethodsLoaded, setCheckoutMethodsLoaded] = useState(false)
+
+  const applyCheckoutMethods = useCallback((methods = {}) => {
+    const next = {
+      pay_online_enabled: methods.pay_online_enabled !== false,
+      whatsapp_order_enabled: methods.whatsapp_order_enabled !== false,
+    }
+    setCheckoutMethods(next)
+    setCheckoutMethodsLoaded(true)
+    setPaymentMethod((current) => {
+      if ((current === 'CASHFREE' && next.pay_online_enabled) || (current === 'WHATSAPP' && next.whatsapp_order_enabled)) return current
+      if (next.pay_online_enabled) return 'CASHFREE'
+      if (next.whatsapp_order_enabled) return 'WHATSAPP'
+      return ''
+    })
+  }, [])
+
+  const handleCheckoutMethodUnavailable = (requestError) => {
+    if (requestError?.code !== 'CHECKOUT_METHOD_DISABLED' || !requestError.data?.checkout) return
+    applyCheckoutMethods(requestError.data.checkout)
+  }
+
+  useEffect(() => {
+    let active = true
+    api('/settings')
+      .then((settings) => { if (active) applyCheckoutMethods(settings?.checkout) })
+      .catch(() => { if (active) setCheckoutMethodsLoaded(true) })
+    return () => { active = false }
+  }, [applyCheckoutMethods])
   const [submitting, setSubmitting] = useState(false)
   const [paymentProcessing, setPaymentProcessing] = useState(false)
   const [processingMessage, setProcessingMessage] = useState('')
@@ -431,6 +461,17 @@ function CheckoutInner() {
       return
     }
 
+    if (!checkoutMethodsLoaded) {
+      setError('Please wait while we check the available checkout methods.')
+      return
+    }
+    if ((paymentMethod === 'CASHFREE' && !checkoutMethods.pay_online_enabled)
+      || (paymentMethod === 'WHATSAPP' && !checkoutMethods.whatsapp_order_enabled)
+      || !paymentMethod) {
+      setError('That checkout method is no longer available. Please choose an enabled method.')
+      return
+    }
+
     // Comprehensive client validation
     const validation = validateAddress(form, { requireDistrict: false })
     if (!validation.isValid) {
@@ -598,6 +639,7 @@ function CheckoutInner() {
           setError(err?.message || 'Your payment could not be completed. Please try again.')
         })
       } catch (err) {
+        handleCheckoutMethodUnavailable(err)
         setPaymentProcessing(false)
         setSubmitting(false)
         setError(err.message || 'Online payment is temporarily unavailable. Please try again later.')
@@ -651,6 +693,7 @@ function CheckoutInner() {
       clearCart()
       router.replace(`/order/${placedOrder.order_number || placedOrder.id}`)
     } catch (err) {
+      handleCheckoutMethodUnavailable(err)
       setError(err.message || 'Failed to process WhatsApp order. Please try again.')
       setSubmitting(false)
     }
@@ -753,13 +796,13 @@ function CheckoutInner() {
   }
 
   return (
-    <div className="container py-10 sm:py-16">
-      <div className="mb-8 border-b border-ink/10 pb-6 flex items-center justify-between">
-        <div>
+    <div className="container min-w-0 px-4 py-8 pb-4 sm:px-7 sm:py-16 sm:pb-0 lg:px-10">
+      <div className="mb-8 flex flex-col gap-4 border-b border-ink/10 pb-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <p className="text-[10px] uppercase tracking-[0.25em] text-mango-dark font-bold">
             Secure Checkout
           </p>
-          <h1 className="mt-1 font-display text-4xl sm:text-5xl text-ink font-normal">
+          <h1 className="mt-1 break-words font-display text-3xl font-normal text-ink sm:text-5xl">
             Finalize Your Order
           </h1>
         </div>
@@ -774,14 +817,14 @@ function CheckoutInner() {
 
       {/* Customer Session Status Banner */}
       {isAuthenticated && user ? (
-        <div className="mb-6 p-4 bg-paper border border-gold/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans text-cocoa shadow-2xs">
+        <div className="mb-6 min-w-0 p-4 bg-paper border border-gold/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans text-cocoa shadow-2xs">
           <div className="flex items-center gap-2.5">
             <div className="h-7 w-7 rounded-full bg-gold/15 text-gold-dark grid place-items-center font-bold text-xs">
               {(user.name || user.email || 'A')[0].toUpperCase()}
             </div>
-            <div>
+            <div className="min-w-0 break-words">
               <span className="text-ink font-semibold">{user.name || user.email}</span>
-              <span className="text-cocoa-light ml-1.5">({user.email})</span>
+              <span className="text-cocoa-light ml-1.5 break-all">({user.email})</span>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -797,7 +840,7 @@ function CheckoutInner() {
           </div>
         </div>
       ) : (
-        <div className="mb-6 p-4 bg-paper border border-ink/15 rounded-xs space-y-3">
+        <div className="mb-6 min-w-0 p-4 bg-paper border border-ink/15 rounded-xs space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-ink/10 pb-3">
             <div>
               <p className="text-xs font-semibold text-ink">Already have an atelier account?</p>
@@ -825,20 +868,20 @@ function CheckoutInner() {
               </Link>
             </div>
           </div>
-          <div className="flex items-center justify-between text-[11px] text-cocoa">
+          <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-cocoa">
             <span className="font-medium text-ink">New to Thretha?</span>
             <span className="text-cocoa-light">✦ Fast Guest Checkout — No account required to complete order</span>
           </div>
         </div>
       )}
 
-      <form onSubmit={handlePlaceOrder} className="grid gap-10 lg:grid-cols-[1fr_420px]">
+      <form onSubmit={handlePlaceOrder} className="grid min-w-0 gap-6 sm:gap-10 lg:grid-cols-[minmax(0,1fr)_420px]">
         {/* Left Form Column */}
-        <div className="space-y-8">
+        <div className="min-w-0 space-y-6 sm:space-y-8">
           {/* Step 1: Customer Contact */}
-          <div className="bg-cream p-6 sm:p-8 border border-ink/10 rounded-sm shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-ink/10 pb-3">
-              <h2 className="font-display text-2xl text-ink font-normal flex items-center gap-2">
+          <div className="min-w-0 bg-cream p-4 sm:p-8 border border-ink/10 rounded-sm shadow-xs space-y-4">
+            <div className="flex flex-col gap-2 border-b border-ink/10 pb-3 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between">
+              <h2 className="min-w-0 font-display text-xl text-ink font-normal flex items-center gap-2 sm:text-2xl">
                 <span className="grid h-6 w-6 place-items-center rounded-full bg-ink text-cream text-xs font-sans font-bold">1</span>
                 Contact Information
               </h2>
@@ -857,7 +900,7 @@ function CheckoutInner() {
               touched={touched.name || touched.fullName}
             />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
               <Field
                 id="checkout-phone"
                 label="WhatsApp / Mobile Number"
@@ -889,9 +932,9 @@ function CheckoutInner() {
           </div>
 
           {/* Step 2: Shipping Address */}
-          <div className="bg-cream p-6 sm:p-8 border border-ink/10 rounded-sm shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-ink/10 pb-3">
-              <h2 className="font-display text-2xl text-ink font-normal flex items-center gap-2">
+          <div className="min-w-0 bg-cream p-4 sm:p-8 border border-ink/10 rounded-sm shadow-xs space-y-4">
+            <div className="flex flex-col gap-2 border-b border-ink/10 pb-3 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between">
+              <h2 className="min-w-0 font-display text-xl text-ink font-normal flex items-center gap-2 sm:text-2xl">
                 <span className="grid h-6 w-6 place-items-center rounded-full bg-ink text-cream text-xs font-sans font-bold">2</span>
                 Delivery Address
               </h2>
@@ -935,7 +978,7 @@ function CheckoutInner() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
               <Field
                 id="checkout-house"
                 label="House / Building / Apartment"
@@ -959,7 +1002,7 @@ function CheckoutInner() {
               />
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4">
               <Field
                 id="checkout-city"
                 label="City / Town"
@@ -1017,82 +1060,84 @@ function CheckoutInner() {
           </div>
 
           {/* Step 3: Payment Method Selection */}
-          <div className="bg-cream p-6 sm:p-8 border border-ink/10 rounded-sm shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-ink/10 pb-3">
-              <h2 className="font-display text-2xl text-ink font-normal flex items-center gap-2">
+          <div className="min-w-0 bg-cream p-4 sm:p-8 border border-ink/10 rounded-sm shadow-xs space-y-4">
+            <div className="flex flex-col gap-2 border-b border-ink/10 pb-3 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between">
+              <h2 className="min-w-0 font-display text-xl text-ink font-normal flex items-center gap-2 sm:text-2xl">
                 <span className="grid h-6 w-6 place-items-center rounded-full bg-ink text-cream text-xs font-sans font-bold">3</span>
                 Payment Preference
               </h2>
               <span className="text-[10px] uppercase tracking-wider text-cocoa-light font-medium">Step 3 of 3</span>
             </div>
 
-            <RadioGroup
+            {checkoutMethodsLoaded ? <RadioGroup
               value={paymentMethod}
               onValueChange={setPaymentMethod}
-              className="grid gap-3 sm:grid-cols-2 pt-2"
+              className="grid min-w-0 gap-3 pt-2 sm:grid-cols-2"
             >
-              {/* Option A: WhatsApp Concierge */}
-              <label
+              {checkoutMethods.whatsapp_order_enabled && <label
                 className={cn(
-                  'cursor-pointer border p-4 rounded-sm transition flex flex-col justify-between',
+                  'min-w-0 cursor-pointer border p-3 sm:p-4 rounded-sm transition flex flex-col justify-between',
                   paymentMethod === 'WHATSAPP'
                     ? 'border-[#25D366] bg-emerald-50/50 shadow-sm ring-1 ring-[#25D366]'
                     : 'border-ink/15 bg-paper hover:border-ink/40'
                 )}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
                     <RadioGroupItem value="WHATSAPP" id="pm-wa" />
-                    <span className="font-bold text-xs text-ink uppercase tracking-wider">
+                    <span className="min-w-0 break-words font-bold text-xs text-ink uppercase tracking-wider">
                       Place Order on WhatsApp
                     </span>
                   </div>
-                  <WAIcon className="h-4 w-4 text-[#25D366]" />
+                  <WAIcon className="h-4 w-4 shrink-0 text-[#25D366]" />
                 </div>
                 <p className="mt-2 text-[11px] text-cocoa leading-relaxed font-sans">
                   Send your order to our team and confirm availability, fittings, and payment on WhatsApp.
                 </p>
-              </label>
+              </label>}
 
-              {/* Option B: Online Payment */}
-              <label
+              {checkoutMethods.pay_online_enabled && <label
                 className={cn(
-                  'cursor-pointer border p-4 rounded-sm transition flex flex-col justify-between',
+                  'min-w-0 cursor-pointer border p-3 sm:p-4 rounded-sm transition flex flex-col justify-between',
                   paymentMethod === 'CASHFREE'
                     ? 'border-mango bg-mango-light/30 shadow-sm ring-1 ring-mango'
                     : 'border-ink/15 bg-paper hover:border-ink/40'
                 )}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
                     <RadioGroupItem value="CASHFREE" id="pm-cf" />
-                    <span className="font-bold text-xs text-ink uppercase tracking-wider">
+                    <span className="min-w-0 break-words font-bold text-xs text-ink uppercase tracking-wider">
                       Pay Online
                     </span>
                   </div>
-                  <CreditCard className="h-4 w-4 text-mango-dark" />
+                  <CreditCard className="h-4 w-4 shrink-0 text-mango-dark" />
                 </div>
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-[10px] text-cocoa leading-relaxed font-sans" aria-label="Supported payment methods: UPI, cards, and net banking">
-                  <span className="inline-flex items-center gap-1.5"><Smartphone className="h-3.5 w-3.5" aria-hidden="true" />UPI</span>
-                  <span className="inline-flex items-center gap-1.5"><CreditCard className="h-3.5 w-3.5" aria-hidden="true" />Cards</span>
-                  <span className="inline-flex items-center gap-1.5"><Landmark className="h-3.5 w-3.5" aria-hidden="true" />Net Banking</span>
+                <div className="mt-2 flex min-w-0 flex-wrap gap-2 text-[10px] text-cocoa leading-relaxed font-sans" aria-label="Supported payment methods: UPI, cards, and net banking">
+                  <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-sm border border-ink/10 bg-cream px-2 py-1 font-semibold"><Smartphone className="h-3.5 w-3.5 shrink-0 text-emerald-700" aria-hidden="true" />UPI</span>
+                  <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-sm border border-ink/10 bg-cream px-2 py-1 font-semibold"><CreditCard className="h-3.5 w-3.5 shrink-0 text-blue-700" aria-hidden="true" />Credit &amp; debit cards</span>
+                  <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-sm border border-ink/10 bg-cream px-2 py-1 font-semibold"><Landmark className="h-3.5 w-3.5 shrink-0 text-cocoa" aria-hidden="true" />Net banking</span>
                 </div>
-              </label>
-            </RadioGroup>
+                <p className="mt-2 text-[10px] text-cocoa-light">Secure payment is processed by Cashfree. Available options appear in the payment window.</p>
+              </label>}
+              {!checkoutMethods.pay_online_enabled && !checkoutMethods.whatsapp_order_enabled && (
+                <p role="alert" className="text-xs font-medium text-coral">Checkout is temporarily unavailable. Please try again shortly.</p>
+              )}
+            </RadioGroup> : <p role="status" className="pt-2 text-xs text-cocoa-light">Checking available payment methods…</p>}
           </div>
         </div>
 
         {/* Right Summary Column */}
-        <aside className="h-fit space-y-6">
-          <div className="bg-cream p-6 sm:p-8 border border-ink/10 rounded-sm shadow-sm space-y-6">
-            <h3 className="font-display text-2xl text-ink font-normal">
+        <aside className="h-fit min-w-0 space-y-6">
+          <div className="min-w-0 bg-cream p-4 sm:p-8 border border-ink/10 rounded-sm shadow-sm space-y-6">
+            <h3 className="break-words font-display text-xl text-ink font-normal sm:text-2xl">
               Order Review ({cartCount} {cartCount === 1 ? 'item' : 'items'})
             </h3>
 
             {/* Items List */}
             <div className="space-y-4 max-h-64 overflow-y-auto pr-1 border-b border-ink/10 pb-4 hide-scrollbar">
               {cart.map((item, idx) => (
-                <div key={idx} className="flex gap-3 text-xs">
+                <div key={idx} className="flex min-w-0 gap-3 text-xs">
                   <div className="h-16 w-12 shrink-0 overflow-hidden rounded-sm bg-sand/30 border border-ink/10">
                     {item.image ? (
                       <img src={item.image} alt={item.product_name} className="h-full w-full object-cover" />
@@ -1102,15 +1147,15 @@ function CheckoutInner() {
                   </div>
                   <div className="flex-1 min-w-0 flex flex-col justify-between">
                     <div>
-                      <p className="font-semibold text-ink truncate flex items-center gap-1">
+                      <p className="min-w-0 whitespace-normal break-words font-semibold text-ink flex items-start gap-1">
                         {item.is_combo && <Sparkles className="h-3 w-3 text-mango-dark shrink-0" />}
-                        <span>{item.combo_name || item.product_name}</span>
+                        <span className="min-w-0 break-words">{item.combo_name || item.product_name}</span>
                       </p>
                       {item.is_combo ? (
                         <div className="space-y-0.5 mt-0.5">
                           <p className="text-[10px] text-mango-dark font-medium">Curated Ensemble ({item.quantity}x)</p>
                           {Array.isArray(item.components) && item.components.length > 0 && (
-                            <p className="text-[9px] text-cocoa truncate">
+                          <p className="text-[9px] text-cocoa whitespace-normal break-words">
                               {item.components.map((c) => `${c.product_name} (${c.size || 'Free Size'})`).join(', ')}
                             </p>
                           )}
@@ -1121,7 +1166,7 @@ function CheckoutInner() {
                         </p>
                       )}
                     </div>
-                    <p className="font-semibold text-ink">{inr(item.price * item.quantity)}</p>
+                    <p className="shrink-0 font-semibold text-ink">{inr(item.price * item.quantity)}</p>
                   </div>
                 </div>
               ))}
@@ -1135,8 +1180,8 @@ function CheckoutInner() {
               </label>
 
               {coupon ? (
-                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 p-2.5 rounded-xs text-xs font-semibold text-emerald-800">
-                  <span className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-emerald-50 border border-emerald-200 p-2.5 rounded-xs text-xs font-semibold text-emerald-800">
+                  <span className="flex min-w-0 flex-1 items-center gap-1.5 break-words">
                     <CheckCircle2 className="h-4 w-4 text-emerald-700 shrink-0" />
                     <span>
                       <strong>{coupon.code}</strong> applied{' '}
@@ -1154,7 +1199,7 @@ function CheckoutInner() {
                   </button>
                 </div>
               ) : (
-                <div className="flex gap-2">
+                <div className="flex min-w-0 gap-2">
                   <Input
                     value={couponInput}
                     onChange={(e) => {
@@ -1168,13 +1213,13 @@ function CheckoutInner() {
                       }
                     }}
                     placeholder="Enter coupon code"
-                    className="rounded-none border-ink/20 bg-paper text-xs uppercase tracking-wider focus-visible:border-mango"
+                    className="min-w-0 flex-1 rounded-none border-ink/20 bg-paper text-xs uppercase tracking-wider focus-visible:border-mango"
                   />
                   <Button
                     type="button"
                     onClick={applyPromoCode}
                     disabled={couponLoading || !couponInput.trim()}
-                    className="rounded-none bg-ink text-cream text-xs uppercase tracking-wider px-4 font-semibold shrink-0 hover:bg-cocoa-dark"
+                    className="shrink-0 rounded-none bg-ink text-cream text-xs uppercase tracking-wider px-3 sm:px-4 font-semibold hover:bg-cocoa-dark"
                   >
                     {couponLoading ? 'Checking…' : 'Apply'}
                   </Button>
@@ -1211,9 +1256,9 @@ function CheckoutInner() {
             </div>
 
             {/* Total */}
-            <div className="flex items-baseline justify-between">
-              <span className="font-display text-xl text-ink">Total Payable</span>
-              <span className="font-display text-3xl font-semibold text-ink">{inr(cartTotal)}</span>
+            <div className="flex min-w-0 items-baseline justify-between gap-2">
+              <span className="font-display text-base text-ink sm:text-xl">Total Payable</span>
+              <span className="shrink-0 font-display text-2xl font-semibold text-ink sm:text-3xl">{inr(cartTotal)}</span>
             </div>
 
             {error && (
@@ -1225,9 +1270,9 @@ function CheckoutInner() {
             {/* Submit Button */}
             <Button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !checkoutMethodsLoaded || !paymentMethod}
               className={cn(
-                'w-full rounded-none py-6 text-xs uppercase tracking-[0.22em] font-semibold text-white shadow-lg transition flex items-center justify-center gap-2',
+                'w-full max-w-full rounded-none py-6 text-xs uppercase tracking-[0.12em] sm:tracking-[0.22em] font-semibold text-white shadow-lg transition flex items-center justify-center gap-2',
                 paymentMethod === 'WHATSAPP'
                   ? 'bg-[#25D366] hover:bg-[#1eb457]'
                   : 'bg-ink hover:bg-cocoa-dark'

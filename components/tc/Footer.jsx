@@ -125,7 +125,7 @@ export default function Footer({ navigate, settings, initialCategories, resolved
         </div>
 
         {/* Atelier Direct Contact */}
-        <div className="space-y-3 text-xs text-cocoa">
+        <div className="min-w-0 space-y-3 text-xs text-cocoa">
           <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-ink">
             Kochi Atelier
           </p>
@@ -139,9 +139,9 @@ export default function Footer({ navigate, settings, initialCategories, resolved
             <PhoneCall className="h-4 w-4 shrink-0 text-mango-dark" />
             <span>{settings?.phone || '+91 83018 24696'}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <Mail className="h-4 w-4 shrink-0 text-mango-dark" />
-            <span>{settings?.email || 'care@threthacouture.com'}</span>
+            <span className="min-w-0 break-all">{settings?.email || 'care@threthacouture.com'}</span>
           </div>
 
           <div className="pt-2">

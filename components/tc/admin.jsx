@@ -1874,6 +1874,7 @@ function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [checkoutMethodError, setCheckoutMethodError] = useState('')
 
   useEffect(() => {
     api('/admin/settings', { token })
@@ -1933,6 +1934,17 @@ function SettingsPage() {
       ...s,
       shipping: { ...s.shipping, [k]: v },
     }))
+
+  const setCheckoutMethod = (key, enabled) => {
+    const checkout = f.checkout || { pay_online_enabled: true, whatsapp_order_enabled: true }
+    const next = { ...checkout, [key]: enabled }
+    if (!next.pay_online_enabled && !next.whatsapp_order_enabled) {
+      setCheckoutMethodError('At least one checkout method must remain enabled.')
+      return
+    }
+    setCheckoutMethodError('')
+    set('checkout', next)
+  }
 
   const save = async () => {
     setSaving(true)
@@ -2030,6 +2042,41 @@ function SettingsPage() {
             <span className={cn('absolute top-1 h-4 w-4 rounded-full bg-white transition-transform', f.pwa?.install_prompt_enabled !== false ? 'translate-x-6' : 'translate-x-1')} />
           </button>
         </div>
+      </section>
+
+      <section className="border border-ink/10 bg-cream p-6 paper-card space-y-5">
+        <div>
+          <h2 className="font-display text-2xl text-ink">Checkout &amp; Payments</h2>
+          <p className="mt-1 max-w-xl text-xs leading-relaxed text-cocoa-light">Choose which payment routes are available for new checkout attempts. Existing orders are not changed.</p>
+        </div>
+        {[
+          ['pay_online_enabled', 'Pay Online', 'Customers pay securely through Cashfree.'],
+          ['whatsapp_order_enabled', 'Order on WhatsApp', 'Customers can submit new concierge orders from checkout.'],
+        ].map(([key, label, description]) => {
+          const enabled = f.checkout?.[key] !== false
+          const otherKey = key === 'pay_online_enabled' ? 'whatsapp_order_enabled' : 'pay_online_enabled'
+          const otherEnabled = f.checkout?.[otherKey] !== false
+          return (
+            <div key={key} className="flex items-center justify-between gap-4 border-t border-ink/10 pt-4">
+              <div>
+                <p className="text-xs font-semibold text-ink">{label}</p>
+                <p className="mt-1 text-[11px] text-cocoa-light">{description}</p>
+                <p className="mt-1 text-[10px] font-medium uppercase tracking-wider text-cocoa">{enabled ? 'ON' : 'OFF'}</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={enabled}
+                aria-label={`Toggle ${label}`}
+                onClick={() => setCheckoutMethod(key, !enabled)}
+                className={cn('relative h-6 w-11 shrink-0 rounded-full transition-colors outline-hidden focus-visible:ring-2 focus-visible:ring-gold-dark', enabled ? 'bg-ink' : 'bg-ink/20', enabled && !otherEnabled && 'ring-1 ring-emerald-700/30')}
+              >
+                <span className={cn('absolute top-1 h-4 w-4 rounded-full bg-white transition-transform', enabled ? 'translate-x-6' : 'translate-x-1')} />
+              </button>
+            </div>
+          )
+        })}
+        {checkoutMethodError && <p role="alert" className="text-xs font-medium text-coral">{checkoutMethodError}</p>}
       </section>
 
       {/* Global Combos & Ensembles Master Toggle */}
