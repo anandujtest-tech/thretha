@@ -13,12 +13,13 @@ function WAIcon({ className = 'h-4 w-4' }) {
   )
 }
 
-export default function Footer({ navigate, settings, initialCategories, editorial = false }) {
+export default function Footer({ navigate, settings, initialCategories, resolvedCategories, editorial = false }) {
   const [categories, setCategories] = useState(() => Array.isArray(initialCategories) ? initialCategories : [])
 
   useEffect(() => {
-    setCategories(Array.isArray(initialCategories) ? initialCategories : [])
-  }, [initialCategories])
+    if (Array.isArray(initialCategories)) setCategories(initialCategories)
+    else if (Array.isArray(resolvedCategories)) setCategories(resolvedCategories)
+  }, [initialCategories, resolvedCategories])
 
   const waNum = (settings?.whatsapp || '918301824696').replace(/[^0-9]/g, '')
   const waUrl = `https://wa.me/${waNum}`
