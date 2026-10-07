@@ -25,6 +25,7 @@ import {
   MessageSquareText,
   ChartNoAxesCombined,
   Mail,
+  GripVertical,
 } from 'lucide-react'
 import PromotionsManager from './admin/PromotionsManager'
 import ShippingDetailsEditor from './admin/ShippingDetailsEditor'
@@ -63,6 +64,7 @@ import { isProductVariantAvailable } from '@/lib/productInventory'
 import ReviewsManager from './admin/ReviewsManager'
 import ProductPerformance from './admin/ProductPerformance'
 import NewsletterManager from './admin/NewsletterManager'
+import HomeLayoutManager from './admin/HomeLayoutManager'
 
 const STATUSES = [
   'NEW',
@@ -2607,7 +2609,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
   const [tab, setTab] = useState(defaultTab || 'dashboard')
 
   useEffect(() => {
-    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'settings'])
+    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'home-layout', 'settings'])
     const syncTabFromUrl = () => {
       const requestedTab = new URLSearchParams(window.location.search).get('tab')
       setTab(validTabs.has(requestedTab) ? requestedTab : (validTabs.has(defaultTab) ? defaultTab : 'dashboard'))
@@ -2618,7 +2620,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
   }, [defaultTab])
 
   const selectTab = (nextTab) => {
-    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'settings'])
+    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'home-layout', 'settings'])
     if (!validTabs.has(nextTab)) return
     setTab(nextTab)
     router.push(nextTab === 'dashboard' ? '/admin' : `/admin?tab=${encodeURIComponent(nextTab)}`, { scroll: false })
@@ -2667,12 +2669,13 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
     ['performance', 'Performance', ChartNoAxesCombined],
     ['newsletter', 'Newsletter', Mail],
     ['notifications', 'Notifications', Bell],
+    ['home-layout', 'Home Layout', GripVertical],
     ['settings', 'Settings', SettingsIcon],
   ]
 
   return (
     <div className="flex min-h-screen bg-paper">
-      <aside className="hidden w-64 shrink-0 flex-col justify-between border-r border-ink/10 bg-[#141312] p-6 md:flex text-cream">
+      <aside className="hidden w-64 shrink-0 flex-col justify-between overflow-y-auto border-r border-ink/10 bg-[#141312] p-6 md:flex text-cream">
         <div>
           <div className="mb-8">
             <h1 className="font-display text-2xl tracking-wide text-cream leading-none">
@@ -2757,6 +2760,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
         {tab === 'promotions' && <PromotionsManager />}
         {tab === 'notifications' && <><BrowserPushManager /><OrderNotificationsManager /></>}
         {tab === 'settings' && <SettingsPage />}
+        {tab === 'home-layout' && <HomeLayoutManager />}
         {tab === 'reviews' && <ReviewsManager />}
         {tab === 'performance' && <ProductPerformance />}
         {tab === 'newsletter' && <NewsletterManager />}

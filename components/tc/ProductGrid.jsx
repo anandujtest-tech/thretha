@@ -35,6 +35,7 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
   const router = useRouter()
   const searchParams = useSearchParams()
   const queryOccasion = searchParams.get('occasion') || ''
+  const queryColour = searchParams.get('colour') || ''
   const queryMinPrice = searchParams.get('minPrice') || ''
   const queryMaxPrice = searchParams.get('maxPrice') || ''
   const queryMinNumber = queryMinPrice === '' ? null : Number(queryMinPrice)
@@ -50,10 +51,11 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
   const [sort, setSort] = useState('newest')
   const [q, setQ] = useState('')
   const [cols, setCols] = useState(3) // 2 or 3/4
+  const [filterOpen, setFilterOpen] = useState(false)
   const [filters, setFilters] = useState({
     availability: '',
     size: '',
-    colour: '',
+    colour: queryColour,
     min_price: initialMinPrice,
     max_price: initialMaxPrice,
   })
@@ -137,6 +139,7 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
     if (min.value !== '' && max.value !== '' && Number(min.value) > Number(max.value)) { setPriceError('Minimum price cannot be greater than maximum price.'); return }
     setPriceError('')
     setFilters((current) => ({ ...current, min_price: min.value, max_price: max.value }))
+    setFilterOpen(false)
   }
 
   const resetPriceFilter = () => {
@@ -302,7 +305,7 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
           </div>
 
           {/* Mobile Filter Sheet Trigger */}
-          <Sheet>
+          <Sheet open={filterOpen} onOpenChange={setFilterOpen}>
             <SheetTrigger asChild>
               <Button
                 variant="outline"

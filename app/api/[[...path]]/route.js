@@ -113,6 +113,8 @@ import { ensureAbandonedCartIndexes, createCartKey, getCartRecoveryItems, create
 import { ensureNewsletterIndexes, createNewsletterUnsubscribeToken, verifyNewsletterUnsubscribeToken, normalizeNewsletterEmail, isValidNewsletterEmail } from '../../../lib/newsletter.js'
 import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
 import { getProductEffectivePrice } from '../../../lib/productInventory.js'
+import { isValidHomeSectionOrderInput, normalizeHomeSectionOrder } from '../../../lib/homeLayout.js'
+import { DEFAULT_HOMEPAGE_CONTENT } from '../../../lib/homepageContent.js'
 import { ANALYTICS_DEDUPE_WINDOWS, allowAnalyticsRequest, createAnalyticsDedupeKey, reserveAnalyticsDedupe, validateAnalyticsEntity, validateAnalyticsPayload } from '../../../lib/analyticsProtection.js'
 
 export const runtime = 'nodejs'
@@ -3953,6 +3955,22 @@ async function handleRoute(request, { params }) {
         }
       }
 
+      // ---- Homepage section order (update only this setting; never overwrite other settings) ----
+      if (route === '/admin/home-layout' && method === 'GET') {
+        const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { 'homepage_content.section_order': 1 } })
+        return json({ section_order: normalizeHomeSectionOrder(settings?.homepage_content?.section_order) })
+      }
+      if (route === '/admin/home-layout' && method === 'PUT') {
+        const body = await request.json().catch(() => null)
+        if (!isValidHomeSectionOrderInput(body?.section_order)) {
+          return json({ error: 'Homepage section order must be a list of section IDs.' }, 400)
+        }
+        const sectionOrder = normalizeHomeSectionOrder(body.section_order)
+        await database.collection('settings').updateOne({ id: 'global' }, { $set: { 'homepage_content.section_order': sectionOrder, updated_at: new Date() } }, { upsert: true })
+        revalidatePath('/', 'page')
+        return json({ section_order: sectionOrder })
+      }
+
       // ---- Admin settings ----
       if (route === '/admin/settings' && method === 'GET') {
         const s = await database.collection('settings').findOne({ id: 'global' })
@@ -4025,6 +4043,12 @@ async function handleRoute(request, { params }) {
         const update = { ...b, updated_at: new Date() }
         delete update.id; delete update._id
         if (checkoutUpdate) update.checkout = checkoutUpdate
+        if (b.homepage_content && typeof b.homepage_content === 'object' && !Array.isArray(b.homepage_content)) {
+          delete update.homepage_content
+          for (const [key, value] of Object.entries(b.homepage_content)) {
+            if (Object.hasOwn(DEFAULT_HOMEPAGE_CONTENT, key)) update[`homepage_content.${key}`] = value
+          }
+        }
         const expectedDefaultCourier = b.shipping?.default_courier
         if (b.shipping && typeof b.shipping === 'object') {
           // Write shipping fields independently so a stale/partial settings
