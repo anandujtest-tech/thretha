@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { useCart } from './CartContext'
 import FashionImage from './FashionImage'
 import { trackVisitorEvent } from '@/lib/visitorAnalytics'
+import { isProductVariantAvailable } from '@/lib/productInventory'
 
 const QuickViewModal = dynamic(() => import('./QuickViewModal'))
 
@@ -41,9 +42,9 @@ export default function ProductCard({ p, settings, addToCart, editorial = false 
   const secondaryImg = media.filter((m) => m.type !== 'video')[1]?.url
   const hasVideo = media.some((m) => m.type === 'video')
 
-  const soldOut = p.stock <= 0
+  const soldOut = !isProductVariantAvailable(p)
   const threshold = settings?.low_stock_threshold ?? 3
-  const lowStock = !soldOut && p.stock <= threshold
+  const lowStock = !soldOut && p.stock > 0 && p.stock <= threshold
   const price = p.discount_price || p.price
   const hasDiscount = p.discount_price && p.discount_price < p.price
   const discountPercent = hasDiscount

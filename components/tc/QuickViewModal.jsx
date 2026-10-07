@@ -8,12 +8,13 @@ import { inr, toggleWishlist, inWishlist } from '@/lib/tc'
 import { useCart } from './CartContext'
 import FashionImage from './FashionImage'
 import SizeGuideModal from './SizeGuideModal'
+import { getProductAvailableStock, isProductVariantAvailable } from '@/lib/productInventory'
 
 export default function QuickViewModal({ product, open, onOpenChange, navigate, addToCart, returnFocusRef }) {
   const router = useRouter()
   const { cart } = useCart()
   const sizes = (product?.sizes || []).filter(s => s?.size)
-  const [size, setSize] = useState(() => sizes.find(s => s.available)?.size || (sizes.length ? '' : 'Free Size'))
+  const [size, setSize] = useState(() => sizes.find(s => isProductVariantAvailable(product, s.size))?.size || (sizes.length ? '' : 'Free Size'))
   const [quantity, setQuantity] = useState(1)
   const [activeMedia, setActiveMedia] = useState(() => Math.max(0, (product?.media || []).filter(m => m.url).findIndex(m => m.is_primary)))
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false)
@@ -22,10 +23,10 @@ export default function QuickViewModal({ product, open, onOpenChange, navigate, 
   const [adding, setAdding] = useState(false)
   const pending = useRef(null)
   const closeRef = useRef(null)
-  const stock = Math.max(0, Number(product?.stock ?? 999))
+  const stock = getProductAvailableStock(product, size)
   const cartQuantity = Number(cart.find(item => !item.is_combo && String(item.product_id) === String(product?.id) && item.size === size)?.quantity || 0)
   const remaining = Math.max(0, stock - cartQuantity)
-  const availableSize = sizes.length ? sizes.some(s => s.size === size && s.available) : true
+  const availableSize = sizes.length ? isProductVariantAvailable(product, size) : true
 
   useEffect(() => {
     setQuantity(q => Math.min(q, Math.max(1, remaining)))
@@ -106,7 +107,7 @@ export default function QuickViewModal({ product, open, onOpenChange, navigate, 
             <div className="quick-shop-price"><span>{inr(product.discount_price || product.price)}</span>{discounted && <><del>{inr(product.price)}</del><small>Save {inr(product.price - product.discount_price)}</small></>}</div>
             {product.description && <p className="quick-shop-description">{product.description}</p>}
             {product.colour && <p className="quick-shop-colour"><span>Colour</span> {product.colour}</p>}
-            {sizes.length > 0 && <fieldset className="quick-shop-sizes" disabled={adding}><legend>Size</legend><button className="quick-shop-size-guide" type="button" onClick={() => setSizeGuideOpen(true)}><Ruler size={14} /> Size guide</button><div>{sizes.map(s => <button type="button" key={s.size} disabled={!s.available || !stock} aria-pressed={size === s.size} aria-label={`Size ${s.size}${!s.available || !stock ? ' — unavailable' : ''}`} onClick={() => { setSize(s.size); setQuantity(1); setMessage('') }}>{s.size}</button>)}</div></fieldset>}
+            {sizes.length > 0 && <fieldset className="quick-shop-sizes" disabled={adding}><legend>Size</legend><button className="quick-shop-size-guide" type="button" onClick={() => setSizeGuideOpen(true)}><Ruler size={14} /> Size guide</button><div>{sizes.map(s => { const available = isProductVariantAvailable(product, s.size); return <button type="button" key={s.size} disabled={!available} aria-pressed={size === s.size} aria-label={`Size ${s.size}${!available ? ' — unavailable' : ''}`} onClick={() => { setSize(s.size); setQuantity(1); setMessage('') }}>{s.size}</button> })}</div></fieldset>}
             <div className="quick-shop-quantity"><span>Quantity</span><div><button type="button" aria-label="Decrease quantity" disabled={quantity <= 1 || adding} onClick={() => setQuantity(q => Math.max(1, q - 1))}><Minus size={15} /></button><output aria-live="polite">{Math.min(quantity, Math.max(1, remaining))}</output><button type="button" aria-label="Increase quantity" disabled={quantity >= remaining || !availableSize || adding} onClick={() => setQuantity(q => Math.min(remaining, q + 1))}><Plus size={15} /></button></div></div>
             <p className="quick-shop-status" role="status">{message || (!stock ? 'Sold out' : !remaining ? 'Available quantity is already in your bag.' : !availableSize ? 'Select an available size.' : 'Available to add to your bag')}</p>
             <div className="quick-shop-actions">{cartQuantity > 0 ? <button className="quick-shop-add" type="button" onClick={() => { onOpenChange(false); (navigate || router.push)('/cart') }}><ShoppingBag size={17} />View bag</button> : <button className="quick-shop-add" type="button" onClick={add} disabled={!stock || !remaining || !availableSize || adding}><ShoppingBag size={17} />{adding ? 'Adding…' : !stock ? 'Sold out' : 'Add to bag'}</button>}<button className="quick-shop-details" type="button" onClick={() => { onOpenChange(false); (navigate || router.push)(`/product/${product.slug}`) }}>View full details <ArrowRight size={15} /></button></div>

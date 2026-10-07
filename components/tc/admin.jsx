@@ -59,6 +59,7 @@ import { DEFAULT_HOMEPAGE_CONTENT } from '@/lib/homepageContent'
 import { DELIVERY_SERVICES } from '@/lib/deliveryServices'
 import { uploadMediaFile } from '@/lib/mediaUpload'
 import { DEFAULT_OCCASIONS } from '@/lib/occasions'
+import { isProductVariantAvailable } from '@/lib/productInventory'
 import ReviewsManager from './admin/ReviewsManager'
 import ProductPerformance from './admin/ProductPerformance'
 import NewsletterManager from './admin/NewsletterManager'
@@ -1213,14 +1214,14 @@ function Products() {
                     <span
                       className={cn(
                         'inline-block px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-sm',
-                        p.stock > 3
+                        !isProductVariantAvailable(p)
+                          ? 'bg-red-100 text-red-800'
+                          : p.stock > 3
                           ? 'bg-green-100 text-green-800'
-                          : p.stock > 0
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-red-100 text-red-800'
+                          : 'bg-amber-100 text-amber-800'
                       )}
                     >
-                      {p.stock > 0 ? `${p.stock} in stock` : 'Sold out'}
+                      {!isProductVariantAvailable(p) ? 'Sold out' : p.stock > 0 ? `${p.stock} in stock` : 'Variants available'}
                     </span>
                   </td>
                   <td className="p-3">

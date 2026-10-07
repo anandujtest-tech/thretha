@@ -92,7 +92,7 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
 
       const explicitSizes = (product.sizes || []).filter((item) => item && item.size)
       const isMulti = explicitSizes.length > 1 || (explicitSizes.length === 1 && explicitSizes[0].size !== 'Free Size')
-      setSize(isMulti ? explicitSizes.find((item) => isProductVariantAvailable(product, item.size))?.size || '' : explicitSizes[0]?.size || 'Free Size')
+      setSize(isMulti ? (explicitSizes.find((item) => isProductVariantAvailable(product, item.size)) || explicitSizes[0])?.size || '' : explicitSizes[0]?.size || 'Free Size')
     }
     const loadRelated = (product) => {
       if (!product.category_id) return
@@ -168,7 +168,7 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
   }
 
   const media = p.media || []
-  const productStock = Math.max(0, Number(p.stock ?? 999))
+  const productStock = getProductAvailableStock(p)
   const price = Number(p.discount_price || p.price) || 0
   const threshold = settings?.low_stock_threshold ?? 3
   const hasDiscount = p.discount_price && p.discount_price < p.price
@@ -184,7 +184,7 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
   const availableStock = selectedSize ? getProductAvailableStock(p, selectedSize) : productStock
   const soldOut = explicitSizes.length ? !explicitSizes.some((item) => isProductVariantAvailable(p, item.size)) : productStock <= 0
   const selectedSizeOutOfStock = Boolean(selectedSize && !isProductVariantAvailable(p, selectedSize))
-  const low = !soldOut && availableStock <= threshold
+  const low = !soldOut && availableStock > 0 && availableStock <= threshold
 
   const cartItems = cartContext?.cart || []
   const existingCartItem = cartItems.find(
@@ -476,12 +476,12 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
             {/* Stock Alert */}
             {low && (
               <p className="text-xs text-amber-700 font-semibold flex items-center gap-1.5 pt-1">
-                <Sparkles className="h-3.5 w-3.5" /> Only {p.stock} piece{p.stock === 1 ? '' : 's'} remaining in the atelier.
+                <Sparkles className="h-3.5 w-3.5" /> Only {availableStock} piece{availableStock === 1 ? '' : 's'} remaining in the atelier.
               </p>
             )}
             {soldOut && (
               <p className="text-xs text-coral-dark font-semibold">
-                Currently sold out. Contact our WhatsApp concierge to request a custom restock.
+                Out of Stock. Leave your email below and we will notify you when this piece returns.
               </p>
             )}
           </div>
@@ -546,7 +546,8 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
             </div>
           )}
 
-          {(soldOut || (selectedSize && selectedSizeOutOfStock)) && <BackInStockForm product={p} size={isMultiSize ? selectedSize : ''} />}
+          {!soldOut && selectedSizeOutOfStock && <p className="text-xs font-semibold text-coral-dark">Out of Stock in {selectedSize}. Leave your email below for an alert.</p>}
+          {(soldOut || selectedSizeOutOfStock) && <BackInStockForm product={p} size={isMultiSize ? selectedSize : ''} />}
 
           {/* Quantity Stepper */}
           <div className="flex items-center gap-4 pt-2">

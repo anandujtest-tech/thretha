@@ -13,6 +13,7 @@ import FashionImage, { productImage } from './FashionImage'
 import ErrorBoundary from './ErrorBoundary'
 import { getHomepageContent } from '@/lib/homepageContent'
 import OccasionDiscovery from './OccasionDiscovery'
+import Newsletter from './Newsletter'
 
 export default function HomeView({ addToCart, initialData }) {
   const router = useRouter()
@@ -70,14 +71,15 @@ export default function HomeView({ addToCart, initialData }) {
       <ErrorBoundary sectionName="Hero"><FullscreenHero settings={data.settings} /></ErrorBoundary>
       <div className="fashion-intro"><span>{content.intro_left}</span><span>{content.intro_right}</span></div>
       <ErrorBoundary sectionName="Categories"><CategoryDiscovery categories={data.categories} products={imagery} content={content} /></ErrorBoundary>
-      <OccasionDiscovery settings={data.settings} />
       {failed.categories && <div className="fashion-section fashion-data-message" role="status"><p>Categories are temporarily unavailable.</p><button className="fashion-link" type="button" onClick={retry}>Try again <ArrowRight size={15} aria-hidden="true" /></button></div>}
       <ErrorBoundary sectionName="New arrivals"><FeaturedProducts products={data.arrivals} settings={data.settings} addToCart={addToCart} title={content.arrivals_heading} loading={loading} error={failed.arrivals} onRetry={retry} /></ErrorBoundary>
       {edit && <section className="fashion-edit" aria-labelledby="fashion-edit-heading">
         <Link href={`/product/${edit.slug}`} className="fashion-edit-image" aria-label={`Discover ${edit.name}`}><FashionImage src={content.featured_editorial_image || productImage(edit)} alt={edit.name} sizes="(max-width: 767px) 100vw, 55vw" /></Link>
         <div className="fashion-edit-content"><p className="fashion-eyebrow">{content.featured_eyebrow}</p><h2 id="fashion-edit-heading">{content.featured_heading.split('\n').map((line, index) => <span key={index}>{index > 0 && <br />}{index === 1 ? <em>{line}</em> : line}</span>)}</h2><p>{content.featured_description}</p><Link href={content.featured_cta_link || '/shop'} className="fashion-link">{content.featured_cta} <ArrowRight size={16} aria-hidden="true" /></Link></div>
       </section>}
+      <OccasionDiscovery settings={data.settings} products={imagery} categories={data.categories} />
       <ErrorBoundary sectionName="Instagram"><LookbookWall settings={data.settings} editorial content={content} initialFeedData={data.instagramFeed} /></ErrorBoundary>
+      <Newsletter />
       <section className="fashion-final" aria-labelledby="fashion-final-heading"><p className="fashion-eyebrow">{content.final_kicker}</p><h2 id="fashion-final-heading">{content.final_heading.split('\n').map((line, index) => <span key={index}>{index > 0 && <br />}{index === 1 ? <em>{line}</em> : line}</span>)}</h2><Link href={content.final_cta_link || '/shop'} className="fashion-link">{content.final_cta} <ArrowRight size={17} aria-hidden="true" /></Link></section>
     </div>
   )

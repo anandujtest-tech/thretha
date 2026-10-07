@@ -109,7 +109,7 @@ import { ensurePushIndexes, processPushQueue, suppressDuePushCampaigns } from '.
 import { normalizeOccasions, DEFAULT_OCCASIONS } from '../../../lib/occasions.js'
 import { ensureProductReviewIndexes, normalizeReviewText, isCloudinaryImageUrl } from '../../../lib/productReviews.js'
 import { ensureBackInStockIndexes, isVariantAvailable, saveBackInStockSubscription, unsubscribeBackInStockSubscription, verifyBackInStockUnsubscribeToken, verifySignedBackInStockUnsubscribeToken } from '../../../lib/backInStock.js'
-import { ensureAbandonedCartIndexes, createCartKey, getCartRecoveryItems, createCartRecoveryToken, verifyCartRecoveryToken, verifyBackInStockUnsubscribeToken as verifyCartUnsubscribeToken } from '../../../lib/abandonedCart.js'
+import { ensureAbandonedCartIndexes, createCartKey, getCartRecoveryItems, createCartRecoveryToken, verifyCartRecoveryToken, backInStockUnsubscribeToken as createCartUnsubscribeToken, verifyBackInStockUnsubscribeToken as verifyCartUnsubscribeToken } from '../../../lib/abandonedCart.js'
 import { ensureNewsletterIndexes, createNewsletterUnsubscribeToken, verifyNewsletterUnsubscribeToken, normalizeNewsletterEmail, isValidNewsletterEmail } from '../../../lib/newsletter.js'
 import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
 import { getProductEffectivePrice } from '../../../lib/productInventory.js'
@@ -1230,17 +1230,20 @@ async function handleRoute(request, { params }) {
       const collection = database.collection('abandoned_cart_reminders')
       const existing = await collection.findOne({ cart_key: cartKey })
       const now = new Date()
-      if (existing?.status === 'sent' || existing?.status === 'converted') return json({ ok: true, message: 'A reminder was already sent for this bag.' })
+      if (existing?.status === 'sent' || existing?.status === 'converted') return json({ ok: true, active: false, message: 'A reminder was already sent for this bag.' })
+      let reminderId = existing?.id
       if (existing) {
         await collection.updateOne({ id: existing.id, status: { $nin: ['sent', 'converted'] } }, { $set: { status: 'pending', email, email_normalized: email, items, consented_at: now, last_activity_at: now, remind_after: new Date(now.getTime() + 2 * 60 * 60 * 1000), delivery_key: crypto.randomUUID(), attempts: 0, updated_at: now }, $unset: { claimed_at: '', claim_token: '', retry_after: '', failed_at: '', last_error: '', closed_reason: '', closed_at: '' } })
       } else {
         const reminder = { id: uuidv4(), cart_key: cartKey, email, email_normalized: email, items, consented_at: now, created_at: now, last_activity_at: now, remind_after: new Date(now.getTime() + 2 * 60 * 60 * 1000), status: 'pending', attempts: 0, delivery_key: crypto.randomUUID(), created_via: 'explicit_cart_consent' }
-        try { await collection.insertOne(reminder) } catch (error) {
+        try { await collection.insertOne(reminder); reminderId = reminder.id } catch (error) {
           if (error?.code !== 11000) throw error
           await collection.updateOne({ cart_key: cartKey, status: { $nin: ['sent', 'converted'] } }, { $set: { status: 'pending', consented_at: now, last_activity_at: now, remind_after: new Date(now.getTime() + 2 * 60 * 60 * 1000), delivery_key: crypto.randomUUID(), attempts: 0 }, $unset: { retry_after: '', failed_at: '', last_error: '', closed_reason: '', closed_at: '' } })
+          reminderId = (await collection.findOne({ cart_key: cartKey, status: 'pending' }, { projection: { id: 1 } }))?.id
         }
       }
-      return json({ ok: true, message: 'We will send one reminder if this bag is still waiting in two hours.' }, 201)
+      if (!reminderId) return json({ error: 'This bag could not be saved for a reminder.' }, 409)
+      return json({ ok: true, active: true, unsubscribeToken: createCartUnsubscribeToken(reminderId, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret'), message: 'We will send one reminder if this bag is still waiting in two hours.' }, 201)
     }
 
     if (route === '/abandoned-cart/unsubscribe' && method === 'GET') {
@@ -1249,6 +1252,16 @@ async function handleRoute(request, { params }) {
       if (!id) return json({ error: 'Unsubscribe link is invalid or expired.' }, 400)
       const result = await database.collection('abandoned_cart_reminders').updateOne({ id, status: { $ne: 'unsubscribed' } }, { $set: { status: 'unsubscribed', unsubscribed_at: new Date(), updated_at: new Date() } })
       return json({ ok: true, unsubscribed: result.matchedCount > 0 })
+    }
+
+    if (route === '/abandoned-cart/unsubscribe' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const id = verifyCartUnsubscribeToken(body.token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      if (!id) return json({ error: 'Reminder preference is invalid.' }, 400)
+      const collection = database.collection('abandoned_cart_reminders')
+      const result = await collection.updateOne({ id, status: { $ne: 'unsubscribed' } }, { $set: { status: 'unsubscribed', unsubscribed_at: new Date(), updated_at: new Date() } })
+      if (!result.matchedCount && !(await collection.findOne({ id }, { projection: { id: 1 } }))) return json({ error: 'Reminder preference was not found.' }, 404)
+      return json({ ok: true, unsubscribed: true })
     }
 
     if (route === '/abandoned-cart/recover' && method === 'POST') {

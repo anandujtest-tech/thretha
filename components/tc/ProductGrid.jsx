@@ -145,7 +145,7 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
     setFilters((current) => ({ ...current, min_price: '', max_price: '' }))
   }
 
-  const FilterControls = () => (
+  const renderFilterControls = () => (
     <div className="space-y-6 text-xs">
       {/* Availability */}
       <div>
@@ -318,7 +318,7 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
                 </SheetTitle>
               </SheetHeader>
               <div className="mt-6">
-                <FilterControls />
+                {renderFilterControls()}
               </div>
             </SheetContent>
           </Sheet>
@@ -328,7 +328,7 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
       {/* Grid + Desktop Sidebar */}
       <div className="grid gap-10 md:grid-cols-[230px_1fr]">
         <aside className="hidden md:block border-r border-ink/10 pr-8">
-          <FilterControls />
+          {renderFilterControls()}
         </aside>
 
         <div>

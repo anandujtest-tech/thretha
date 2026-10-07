@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils'
 import { useCart, getItemKey } from './CartContext'
 import { useAuth } from './AuthContext'
 
+const CART_REMINDER_STORAGE_KEY = 'tc_cart_reminder_opt_in'
+
 export default function CartPage({
   navigate,
   settings,
@@ -49,8 +51,22 @@ export default function CartPage({
   const [reminderBusy, setReminderBusy] = useState(false)
   const [reminderMessage, setReminderMessage] = useState('')
   const [reminderError, setReminderError] = useState('')
+  const [reminderToken, setReminderToken] = useState('')
+  const [reminderBag, setReminderBag] = useState('')
+  const reminderBagKey = JSON.stringify(cart.filter((item) => !item.is_combo && item.product_id).map((item) => `${item.product_id}:${item.size || ''}:${item.quantity}`).sort())
 
   useEffect(() => { if (user?.email) setReminderEmail(user.email) }, [user?.email])
+  useEffect(() => {
+    if (!isLoaded) return
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(CART_REMINDER_STORAGE_KEY) || 'null')
+      if (saved?.token) {
+        setReminderToken(saved.token)
+        setReminderBag(saved.bag || '')
+        setReminderOptIn(saved.bag === reminderBagKey)
+      }
+    } catch { /* The current page can still save or disable a reminder. */ }
+  }, [isLoaded, reminderBagKey])
 
   useEffect(() => {
     if (settings) {
@@ -97,10 +113,34 @@ export default function CartPage({
     setReminderError(''); setReminderMessage(''); setReminderBusy(true)
     try {
       const items = cart.filter((item) => !item.is_combo && item.product_id).map((item) => ({ product_id: item.product_id, size: item.size, quantity: item.quantity }))
-      const result = await api('/abandoned-cart/subscribe', { method: 'POST', body: { consent: true, email: reminderEmail, items } })
+      const result = await api('/abandoned-cart/subscribe', { method: 'POST', body: { consent: true, email: user?.email || reminderEmail, items } })
+      if (result.active === false) setReminderOptIn(false)
+      if (result.unsubscribeToken) {
+        try { window.localStorage.setItem(CART_REMINDER_STORAGE_KEY, JSON.stringify({ token: result.unsubscribeToken, bag: reminderBagKey })) } catch { /* Keep the token in this page's state. */ }
+        setReminderToken(result.unsubscribeToken)
+        setReminderBag(reminderBagKey)
+      }
       setReminderMessage(result.message || 'Your reminder preference was saved.')
     } catch (err) { setReminderError(err.message || 'Could not save your reminder preference.') }
     finally { setReminderBusy(false) }
+  }
+
+  const changeReminderOptIn = async (checked) => {
+    setReminderError('')
+    setReminderMessage('')
+    if (checked) { setReminderOptIn(true); return }
+    if (!reminderToken) { setReminderOptIn(false); return }
+    setReminderBusy(true)
+    try {
+      await api('/abandoned-cart/unsubscribe', { method: 'POST', body: { token: reminderToken } })
+      try { window.localStorage.removeItem(CART_REMINDER_STORAGE_KEY) } catch {}
+      setReminderToken('')
+      setReminderBag('')
+      setReminderOptIn(false)
+      setReminderMessage('Cart reminders are turned off.')
+    } catch (err) {
+      setReminderError(err.message || 'Could not turn off reminders. Please try again.')
+    } finally { setReminderBusy(false) }
   }
 
   if (!isLoaded) {
@@ -497,6 +537,22 @@ export default function CartPage({
             Bag Summary
           </h2>
 
+          <div className="border border-ink/15 bg-paper p-4">
+            {reminderToken && reminderBag !== reminderBagKey && <div className="mb-3 text-[11px] leading-relaxed text-cocoa">A reminder for an earlier bag is still active. <button type="button" disabled={reminderBusy} onClick={() => changeReminderOptIn(false)} className="font-semibold text-ink underline disabled:opacity-50">Turn it off</button> before saving this bag.</div>}
+            <label className="flex items-start gap-3 text-xs font-semibold leading-relaxed text-ink">
+              <input type="checkbox" checked={reminderOptIn} disabled={reminderBusy || (Boolean(reminderToken) && reminderBag !== reminderBagKey)} onChange={(event) => changeReminderOptIn(event.target.checked)} className="mt-0.5 accent-ink" />
+              <span>Remind me if I leave something in my bag</span>
+            </label>
+            <p className="mt-2 text-[11px] leading-relaxed text-cocoa">Opt in to one email reminder after two hours. This is off until you choose to save it.</p>
+            {reminderOptIn && <div className="mt-3 space-y-2">
+              {user?.email ? <p className="text-xs text-cocoa">Reminder email: {user.email}</p> : <><p className="text-[11px] text-cocoa">Enter your email so we can send your bag reminder.</p><Input type="email" autoComplete="email" value={reminderEmail} onChange={(event) => setReminderEmail(event.target.value)} placeholder="Enter your email" className="rounded-none border-ink/15 bg-cream text-xs" /></>}
+              {!reminderToken && <button type="button" disabled={reminderBusy || !(user?.email || reminderEmail.trim())} onClick={saveCartReminder} className="border border-ink/20 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-ink disabled:opacity-50">{reminderBusy ? 'Saving…' : 'Save reminder preference'}</button>}
+              {reminderToken && <p className="text-[11px] text-emerald-800">Reminder saved. Uncheck above to turn it off.</p>}
+            </div>}
+            {reminderMessage && <p role="status" className="mt-2 text-[11px] text-emerald-800">{reminderMessage}</p>}
+            {reminderError && <p role="alert" className="mt-2 text-[11px] text-coral">{reminderError}</p>}
+          </div>
+
           {/* Coupon Input */}
           <div className="space-y-2 border-b border-ink/10 pb-5">
             <label className="text-[11px] uppercase tracking-wider font-bold text-ink flex items-center gap-1.5">
@@ -573,10 +629,6 @@ export default function CartPage({
           </div>
 
           <div className="space-y-3">
-            <div className="border border-ink/10 bg-paper p-3">
-              <label className="flex items-start gap-2 text-xs text-cocoa"><input type="checkbox" checked={reminderOptIn} onChange={(event) => { setReminderOptIn(event.target.checked); setReminderMessage(''); setReminderError('') }} className="mt-0.5 accent-ink" /><span>Email me one reminder if this bag is still waiting in two hours.</span></label>
-              {reminderOptIn && <div className="mt-3 space-y-2"><Input type="email" autoComplete="email" value={reminderEmail} onChange={(event) => setReminderEmail(event.target.value)} placeholder="Your email address" className="rounded-none border-ink/15 bg-cream text-xs" /><button type="button" disabled={reminderBusy || !reminderEmail.trim()} onClick={saveCartReminder} className="border border-ink/20 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-ink disabled:opacity-50">{reminderBusy ? 'Saving…' : 'Save reminder preference'}</button>{reminderMessage && <p role="status" className="text-[11px] text-emerald-800">{reminderMessage}</p>}{reminderError && <p role="alert" className="text-[11px] text-coral">{reminderError}</p>}<p className="text-[10px] text-cocoa-light">Only one email will be sent. You can unsubscribe from the reminder email.</p></div>}
-            </div>
             {/* Primary Action: Online Checkout */}
             <Button
               disabled={hasDisabledCombos}

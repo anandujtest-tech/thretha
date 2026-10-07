@@ -7,6 +7,7 @@ import { api } from '@/lib/tc'
 export default function Newsletter() {
   const [email, setEmail] = useState('')
   const [subscribed, setSubscribed] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [consent, setConsent] = useState(false)
@@ -18,8 +19,9 @@ export default function Newsletter() {
     if (!consent) { setError('Please consent to receive newsletter emails.'); return }
     setLoading(true)
     try {
-      await api('/newsletter/subscribe', { method: 'POST', body: { email, consent: true } })
+      const result = await api('/newsletter/subscribe', { method: 'POST', body: { email, consent: true } })
       setLoading(false)
+      setSuccessMessage(result.message || (result.alreadySubscribed ? 'You are already subscribed.' : 'Thank you for subscribing.'))
       setSubscribed(true)
       setEmail('')
     } catch (err) {
@@ -58,17 +60,17 @@ export default function Newsletter() {
           {subscribed ? (
             <div className="flex items-center justify-center gap-2 py-4 px-6 bg-cream border border-gold/30 rounded-sm text-xs font-sans uppercase tracking-[0.2em] font-semibold text-ink animate-fade-in shadow-xs">
               <Check className="h-4 w-4 text-emerald-600 shrink-0" />
-              <span>Welcome to The Thretha Edit. Thank you!</span>
+              <span>{successMessage}</span>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-2 w-full">
+            <form onSubmit={handleSubmit} className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap">
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Enter your email address…"
-                className="flex-1 bg-cream border border-ink/20 px-4 py-3.5 text-xs font-sans text-ink placeholder:text-cocoa/40 focus:outline-none focus:border-ink rounded-none transition-colors min-h-[46px]"
+                className="min-h-[46px] min-w-0 flex-1 bg-cream border border-ink/20 px-4 py-3.5 text-xs font-sans text-ink placeholder:text-cocoa/40 focus:outline-none focus:border-ink rounded-none transition-colors sm:min-w-[200px]"
               />
               <button
                 type="submit"
