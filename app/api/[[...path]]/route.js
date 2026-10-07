@@ -106,6 +106,7 @@ import {
   normalizePushSubscription,
 } from '../../../lib/pushNotifications.js'
 import { ensurePushIndexes, processPushQueue, suppressDuePushCampaigns } from '../../../lib/pushScheduler.js'
+import { ANALYTICS_DEDUPE_WINDOWS, allowAnalyticsRequest, createAnalyticsDedupeKey, reserveAnalyticsDedupe, validateAnalyticsEntity, validateAnalyticsPayload } from '../../../lib/analyticsProtection.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -128,6 +129,9 @@ async function connectToMongo() {
       await ensureSeed(database)
       await ensureAuthIndexes(database)
       await ensurePromotionsSeeded(database)
+      await database.collection('visitor_events').createIndex({ event_name: 1, created_at: 1, product_slug: 1 })
+      await database.collection('visitor_event_deduplication').createIndex({ key: 1 }, { unique: true })
+      await database.collection('visitor_event_deduplication').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 })
       return database
     })().catch((err) => {
       dbPromise = undefined // allow retry on next request
@@ -233,7 +237,7 @@ const VISITOR_EVENT_NAMES = new Set([
   'page_view', 'category_view', 'product_view', 'checkout_started',
   'quick_view', 'add_to_cart', 'remove_from_cart', 'search_performed', 'location_shared',
 ])
-const CLIENT_VISITOR_EVENT_NAMES = new Set(['quick_view', 'add_to_cart', 'remove_from_cart', 'search_performed', 'location_shared'])
+const CLIENT_VISITOR_EVENT_NAMES = new Set(['quick_view', 'add_to_cart', 'checkout_started', 'remove_from_cart', 'search_performed', 'location_shared'])
 
 function normalizeVisitorFirstTouch(value) {
   const source = value && typeof value.source === 'string' ? value.source.slice(0, 80) : 'Unknown'
@@ -256,14 +260,43 @@ function normalizeVisitorFirstTouch(value) {
   }
 }
 
-async function recordVisitorActivity(database, request, body, requestedEvent) {
-  const visitorId = String(body.visitor_id || '').slice(0, 100)
-  if (!visitorId) return json({ error: 'Visitor ID required' }, 400)
+async function recordVisitorActivity(database, request, body, requestedEvent, acceptedEvents = null, requiredProductEvents = new Set()) {
+  const validation = validateAnalyticsPayload(body, requestedEvent, {
+    eventNames: VISITOR_EVENT_NAMES,
+    clientEventNames: acceptedEvents,
+    requiredProductEvents,
+  })
+  if (!validation.valid) return json({ error: validation.error }, 400)
 
-  const eventName = VISITOR_EVENT_NAMES.has(requestedEvent) ? requestedEvent : 'page_view'
-  const page = String(body.page || '/').slice(0, 500)
-  const productSlug = typeof body.product_slug === 'string' ? body.product_slug.slice(0, 200) : null
-  const categorySlug = typeof body.category_slug === 'string' ? body.category_slug.slice(0, 200) : null
+  const visitorId = body.visitor_id
+  const eventName = requestedEvent
+  const page = body.page || '/'
+  const productSlug = typeof body.product_slug === 'string' ? body.product_slug : null
+  const categorySlug = typeof body.category_slug === 'string' ? body.category_slug : null
+  const sessionId = body.session_id || 'legacy-session'
+
+  // Bound both traffic per source IP and bursts from one claimed visitor.
+  // Visitor IDs are client supplied, so the IP limit remains the abuse backstop.
+  const forwardedIpForLimit = (request.headers.get('x-forwarded-for') || '').split(',')[0]?.trim()
+  const ipCandidatesForLimit = [request.headers.get('cf-connecting-ip'), request.headers.get('x-vercel-forwarded-for'), request.headers.get('x-real-ip'), forwardedIpForLimit]
+  const rateLimitIp = ipCandidatesForLimit.map((value) => value?.trim()).find((value) => value && isIP(value)) || getClientIp(request)
+  const rate = await allowAnalyticsRequest({ database, ip: rateLimitIp, visitorId, checkRateLimit })
+  if (!rate.allowed) return json({ error: 'Analytics request limit reached.' }, 429)
+
+  const entityValidation = await validateAnalyticsEntity(database, eventName, productSlug, categorySlug)
+  if (!entityValidation.valid) return json({ error: entityValidation.error }, 400)
+
+  // Product views count once per visitor/session/product in a 30-minute window;
+  // cart adds are deduped for 10 seconds; checkout starts once per 30 minutes.
+  // Other events retain their existing raw-event semantics.
+  const eventNow = Date.now()
+  const dedupeKey = createAnalyticsDedupeKey({ visitorId, sessionId, eventName, entitySlug: productSlug, now: eventNow })
+  if (dedupeKey) {
+    const windowMs = ANALYTICS_DEDUPE_WINDOWS[eventName]
+    const expiresAt = new Date((Math.floor(eventNow / windowMs) + 1) * windowMs + 60_000)
+    if (!await reserveAnalyticsDedupe(database, dedupeKey, expiresAt)) return json({ ok: true, deduplicated: true })
+  }
+
   const latitude = Number.isFinite(body.latitude) && body.latitude >= -90 && body.latitude <= 90 ? body.latitude : null
   const longitude = Number.isFinite(body.longitude) && body.longitude >= -180 && body.longitude <= 180 ? body.longitude : null
   const accuracy = Number.isFinite(body.location_accuracy) && body.location_accuracy > 0 && body.location_accuracy <= 100000 ? body.location_accuracy : null
@@ -284,7 +317,6 @@ async function recordVisitorActivity(database, request, body, requestedEvent) {
     forwardedIp,
   ]
   const ip = ipCandidates.map((value) => value?.trim()).find((value) => value && isIP(value)) || 'unknown'
-  const sessionId = String(body.session_id || 'legacy-session').slice(0, 100)
   const firstTouch = normalizeVisitorFirstTouch(body.first_touch)
   const browser = String(body.browser || 'Unknown').slice(0, 50)
   const operatingSystem = String(body.operating_system || 'Unknown').slice(0, 50)
@@ -824,8 +856,7 @@ async function handleRoute(request, { params }) {
       try {
         const body = await request.json().catch(() => ({}))
         const pageEvents = new Set(['page_view', 'category_view', 'product_view', 'checkout_started'])
-        if (body.event_name && !pageEvents.has(body.event_name)) return json({ error: 'Unsupported page event' }, 400)
-        return await recordVisitorActivity(database, request, body, body.event_name)
+        return await recordVisitorActivity(database, request, body, body.event_name, pageEvents)
       } catch (err) {
         console.error('Visitor analytics error:', err)
         return json({ ok: false }, 500)
@@ -834,10 +865,7 @@ async function handleRoute(request, { params }) {
     if (route === '/analytics/event' && method === 'POST') {
       try {
         const body = await request.json().catch(() => ({}))
-        if (!CLIENT_VISITOR_EVENT_NAMES.has(body.event_name)) {
-          return json({ error: 'Unsupported analytics event' }, 400)
-        }
-        return await recordVisitorActivity(database, request, body, body.event_name)
+        return await recordVisitorActivity(database, request, body, body.event_name, CLIENT_VISITOR_EVENT_NAMES, new Set(['quick_view', 'add_to_cart', 'checkout_started', 'remove_from_cart']))
       } catch (err) {
         console.error('Visitor event error:', err)
         return json({ ok: false }, 500)
