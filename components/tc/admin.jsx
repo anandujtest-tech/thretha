@@ -65,6 +65,7 @@ import ReviewsManager from './admin/ReviewsManager'
 import ProductPerformance from './admin/ProductPerformance'
 import NewsletterManager from './admin/NewsletterManager'
 import HomeLayoutManager from './admin/HomeLayoutManager'
+import OccasionsManager from './admin/OccasionsManager'
 
 const STATUSES = [
   'NEW',
@@ -692,6 +693,7 @@ function DetailItem({ label, value }) {
 
 /* --------- Product Editor Modal --------- */
 function ProductEditor({ token, product, categories, onClose, onSaved }) {
+  const [availableOccasions, setAvailableOccasions] = useState(null)
   const [f, setF] = useState(
     () =>
       product || {
@@ -722,6 +724,14 @@ function ProductEditor({ token, product, categories, onClose, onSaved }) {
 
   const [busy, setBusy] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+
+  useEffect(() => {
+    let active = true
+    api('/admin/occasions', { token })
+      .then((result) => { if (active) setAvailableOccasions((result.occasions || []).filter((occasion) => !occasion.deleted)) })
+      .catch(() => { if (active) setAvailableOccasions([]) })
+    return () => { active = false }
+  }, [token])
 
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
   const setV = (k) => (e) => {
@@ -916,13 +926,15 @@ function ProductEditor({ token, product, categories, onClose, onSaved }) {
           <div className="space-y-2 border-t border-ink/10 pt-4">
             <Label className="text-[11px] font-medium uppercase tracking-wider text-ink/70">Shop by Occasion</Label>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {DEFAULT_OCCASIONS.map((occasion) => (
+              {(availableOccasions || []).map((occasion) => (
                 <label key={occasion.slug} className="flex items-center gap-2 text-xs text-cocoa">
                   <Checkbox checked={(f.occasion_slugs || []).includes(occasion.slug)} onCheckedChange={(checked) => set('occasion_slugs', checked ? [...new Set([...(f.occasion_slugs || []), occasion.slug])] : (f.occasion_slugs || []).filter((slug) => slug !== occasion.slug))} />
                   {occasion.name}
                 </label>
               ))}
             </div>
+            {availableOccasions === null && <p className="text-xs text-cocoa">Loading occasions…</p>}
+            {availableOccasions?.length === 0 && <p className="text-xs text-cocoa">No occasions available. Manage them under Shop by Occasion.</p>}
             <p className="text-[10px] text-cocoa-light">Assignments remain saved while Shop by Occasion is turned off.</p>
           </div>
 
@@ -1892,7 +1904,7 @@ function Orders() {
 }
 
 /* --------- Global Settings Page --------- */
-function SettingsPage() {
+function SettingsPage({ onManageOccasions }) {
   const token = auth.get()
   const [f, setF] = useState(null)
   const [saved, setSaved] = useState(false)
@@ -2065,15 +2077,7 @@ function SettingsPage() {
             </button>
           </div>
         })}
-        <div className="border-t border-ink/10 pt-4">
-          <p className="mb-2 text-xs font-semibold text-ink">Active occasions</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {(f.shop_by_occasion?.occasions || DEFAULT_OCCASIONS).map((occasion) => <label key={occasion.slug} className="flex items-center gap-2 text-xs text-cocoa">
-              <Checkbox checked={occasion.active !== false} onCheckedChange={(checked) => set('shop_by_occasion', { ...(f.shop_by_occasion || {}), enabled: f.shop_by_occasion?.enabled !== false, occasions: (f.shop_by_occasion?.occasions || DEFAULT_OCCASIONS).map((item) => item.slug === occasion.slug ? { ...item, active: Boolean(checked) } : item) })} />
-              {occasion.name}
-            </label>)}
-          </div>
-        </div>
+        <button type="button" onClick={onManageOccasions} className="border-t border-ink/10 pt-4 text-xs font-semibold text-ink underline underline-offset-4">Manage occasion cards, covers and products</button>
       </section>
 
       <section className="border border-ink/10 bg-cream p-5 paper-card shadow-2xs">
@@ -2609,7 +2613,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
   const [tab, setTab] = useState(defaultTab || 'dashboard')
 
   useEffect(() => {
-    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'home-layout', 'settings'])
+    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'home-layout', 'occasions', 'settings'])
     const syncTabFromUrl = () => {
       const requestedTab = new URLSearchParams(window.location.search).get('tab')
       setTab(validTabs.has(requestedTab) ? requestedTab : (validTabs.has(defaultTab) ? defaultTab : 'dashboard'))
@@ -2620,7 +2624,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
   }, [defaultTab])
 
   const selectTab = (nextTab) => {
-    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'home-layout', 'settings'])
+    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'home-layout', 'occasions', 'settings'])
     if (!validTabs.has(nextTab)) return
     setTab(nextTab)
     router.push(nextTab === 'dashboard' ? '/admin' : `/admin?tab=${encodeURIComponent(nextTab)}`, { scroll: false })
@@ -2670,6 +2674,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
     ['newsletter', 'Newsletter', Mail],
     ['notifications', 'Notifications', Bell],
     ['home-layout', 'Home Layout', GripVertical],
+    ['occasions', 'Shop by Occasion', Tag],
     ['settings', 'Settings', SettingsIcon],
   ]
 
@@ -2759,8 +2764,9 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
         {tab === 'orders' && <Orders />}
         {tab === 'promotions' && <PromotionsManager />}
         {tab === 'notifications' && <><BrowserPushManager /><OrderNotificationsManager /></>}
-        {tab === 'settings' && <SettingsPage />}
+        {tab === 'settings' && <SettingsPage onManageOccasions={() => selectTab('occasions')} />}
         {tab === 'home-layout' && <HomeLayoutManager />}
+        {tab === 'occasions' && <OccasionsManager />}
         {tab === 'reviews' && <ReviewsManager />}
         {tab === 'performance' && <ProductPerformance />}
         {tab === 'newsletter' && <NewsletterManager />}
