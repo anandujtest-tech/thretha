@@ -22,6 +22,9 @@ import {
   Tag,
   Bell,
   Truck,
+  MessageSquareText,
+  ChartNoAxesCombined,
+  Mail,
 } from 'lucide-react'
 import PromotionsManager from './admin/PromotionsManager'
 import ShippingDetailsEditor from './admin/ShippingDetailsEditor'
@@ -55,6 +58,10 @@ import { broadcastStorefrontSettingsChanged } from '@/lib/storefrontEvents'
 import { DEFAULT_HOMEPAGE_CONTENT } from '@/lib/homepageContent'
 import { DELIVERY_SERVICES } from '@/lib/deliveryServices'
 import { uploadMediaFile } from '@/lib/mediaUpload'
+import { DEFAULT_OCCASIONS } from '@/lib/occasions'
+import ReviewsManager from './admin/ReviewsManager'
+import ProductPerformance from './admin/ProductPerformance'
+import NewsletterManager from './admin/NewsletterManager'
 
 const STATUSES = [
   'NEW',
@@ -706,6 +713,7 @@ function ProductEditor({ token, product, categories, onClose, onSaved }) {
         ai_tryon_enabled: true,
         garment_type: 'Top',
         tryon_image: '',
+        occasion_slugs: [],
       }
   )
 
@@ -900,6 +908,19 @@ function ProductEditor({ token, product, categories, onClose, onSaved }) {
             <AField label="Colour" placeholder="Rose Pink" value={f.colour} onChange={setV('colour')} />
             <AField label="Material" placeholder="Cotton" value={f.material} onChange={setV('material')} />
             <AField label="Pattern" placeholder="Woven Zari" value={f.pattern} onChange={setV('pattern')} />
+          </div>
+
+          <div className="space-y-2 border-t border-ink/10 pt-4">
+            <Label className="text-[11px] font-medium uppercase tracking-wider text-ink/70">Shop by Occasion</Label>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {DEFAULT_OCCASIONS.map((occasion) => (
+                <label key={occasion.slug} className="flex items-center gap-2 text-xs text-cocoa">
+                  <Checkbox checked={(f.occasion_slugs || []).includes(occasion.slug)} onCheckedChange={(checked) => set('occasion_slugs', checked ? [...new Set([...(f.occasion_slugs || []), occasion.slug])] : (f.occasion_slugs || []).filter((slug) => slug !== occasion.slug))} />
+                  {occasion.name}
+                </label>
+              ))}
+            </div>
+            <p className="text-[10px] text-cocoa-light">Assignments remain saved while Shop by Occasion is turned off.</p>
           </div>
 
           <div>
@@ -2024,6 +2045,34 @@ function SettingsPage() {
         </div>
       </div>
 
+      <section className="border border-ink/10 bg-cream p-6 paper-card space-y-5">
+        <div>
+          <h2 className="font-display text-2xl text-ink">Storefront Features</h2>
+          <p className="mt-1 max-w-xl text-xs leading-relaxed text-cocoa-light">Control customer-facing discovery and review features. Turning a feature off preserves its stored data.</p>
+        </div>
+        {[
+          ['reviews', 'Reviews', 'Allow customers to view and submit product reviews.'],
+          ['shop_by_occasion', 'Shop by Occasion', 'Show curated collections such as Wedding, Festive, Onam and Office.'],
+        ].map(([key, label, description]) => {
+          const enabled = f[key]?.enabled !== false
+          return <div key={key} className="flex items-center justify-between gap-4 border-t border-ink/10 pt-4">
+            <div><p className="text-xs font-semibold text-ink">{label}</p><p className="mt-1 text-[11px] text-cocoa-light">{description}</p><p className="mt-1 text-[10px] font-medium uppercase tracking-wider text-cocoa">{enabled ? 'ON' : 'OFF'}</p></div>
+            <button type="button" role="switch" aria-checked={enabled} aria-label={`Toggle ${label}`} onClick={() => set(key, { ...(f[key] || {}), enabled: !enabled, ...(key === 'shop_by_occasion' ? { occasions: f.shop_by_occasion?.occasions || DEFAULT_OCCASIONS } : {}) })} className={cn('relative h-6 w-11 shrink-0 rounded-full transition-colors outline-hidden focus-visible:ring-2 focus-visible:ring-gold-dark', enabled ? 'bg-ink' : 'bg-ink/20')}>
+              <span className={cn('absolute top-1 h-4 w-4 rounded-full bg-white transition-transform', enabled ? 'translate-x-6' : 'translate-x-1')} />
+            </button>
+          </div>
+        })}
+        <div className="border-t border-ink/10 pt-4">
+          <p className="mb-2 text-xs font-semibold text-ink">Active occasions</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {(f.shop_by_occasion?.occasions || DEFAULT_OCCASIONS).map((occasion) => <label key={occasion.slug} className="flex items-center gap-2 text-xs text-cocoa">
+              <Checkbox checked={occasion.active !== false} onCheckedChange={(checked) => set('shop_by_occasion', { ...(f.shop_by_occasion || {}), enabled: f.shop_by_occasion?.enabled !== false, occasions: (f.shop_by_occasion?.occasions || DEFAULT_OCCASIONS).map((item) => item.slug === occasion.slug ? { ...item, active: Boolean(checked) } : item) })} />
+              {occasion.name}
+            </label>)}
+          </div>
+        </div>
+      </section>
+
       <section className="border border-ink/10 bg-cream p-5 paper-card shadow-2xs">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -2557,7 +2606,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
   const [tab, setTab] = useState(defaultTab || 'dashboard')
 
   useEffect(() => {
-    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'notifications', 'settings'])
+    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'settings'])
     const syncTabFromUrl = () => {
       const requestedTab = new URLSearchParams(window.location.search).get('tab')
       setTab(validTabs.has(requestedTab) ? requestedTab : (validTabs.has(defaultTab) ? defaultTab : 'dashboard'))
@@ -2568,7 +2617,7 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
   }, [defaultTab])
 
   const selectTab = (nextTab) => {
-    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'notifications', 'settings'])
+    const validTabs = new Set(['dashboard', 'products', 'categories', 'combos', 'orders', 'promotions', 'reviews', 'performance', 'newsletter', 'notifications', 'settings'])
     if (!validTabs.has(nextTab)) return
     setTab(nextTab)
     router.push(nextTab === 'dashboard' ? '/admin' : `/admin?tab=${encodeURIComponent(nextTab)}`, { scroll: false })
@@ -2613,6 +2662,9 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
     ['combos', 'Combos', Sparkles],
     ['orders', 'Orders', ShoppingBag],
     ['promotions', 'Promotions', Tag],
+    ['reviews', 'Reviews', MessageSquareText],
+    ['performance', 'Performance', ChartNoAxesCombined],
+    ['newsletter', 'Newsletter', Mail],
     ['notifications', 'Notifications', Bell],
     ['settings', 'Settings', SettingsIcon],
   ]
@@ -2704,6 +2756,9 @@ export default function Admin({ navigate, defaultTab = 'dashboard' }) {
         {tab === 'promotions' && <PromotionsManager />}
         {tab === 'notifications' && <><BrowserPushManager /><OrderNotificationsManager /></>}
         {tab === 'settings' && <SettingsPage />}
+        {tab === 'reviews' && <ReviewsManager />}
+        {tab === 'performance' && <ProductPerformance />}
+        {tab === 'newsletter' && <NewsletterManager />}
       </main>
     </div>
   )

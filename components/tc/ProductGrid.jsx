@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Search,
   SlidersHorizontal,
@@ -33,10 +33,20 @@ import ProductCard from './ProductCard'
 
 export default function ProductGrid({ navigate, settings, path, addToCart, initialProducts, initialCategory }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const queryOccasion = searchParams.get('occasion') || ''
+  const queryMinPrice = searchParams.get('minPrice') || ''
+  const queryMaxPrice = searchParams.get('maxPrice') || ''
+  const queryMinNumber = queryMinPrice === '' ? null : Number(queryMinPrice)
+  const queryMaxNumber = queryMaxPrice === '' ? null : Number(queryMaxPrice)
+  const initialPriceValid = (queryMinNumber === null || (Number.isFinite(queryMinNumber) && queryMinNumber >= 0)) && (queryMaxNumber === null || (Number.isFinite(queryMaxNumber) && queryMaxNumber >= 0)) && (queryMinNumber === null || queryMaxNumber === null || queryMinNumber <= queryMaxNumber)
+  const initialMinPrice = initialPriceValid ? queryMinPrice : ''
+  const initialMaxPrice = initialPriceValid ? queryMaxPrice : ''
   const nav = navigate || ((to) => router.push(to))
   const [products, setProducts] = useState(initialProducts || [])
   const [loading, setLoading] = useState(!initialProducts)
   const [cat, setCat] = useState(initialCategory || null)
+  const [occasion, setOccasion] = useState('')
   const [sort, setSort] = useState('newest')
   const [q, setQ] = useState('')
   const [cols, setCols] = useState(3) // 2 or 3/4
@@ -44,9 +54,11 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
     availability: '',
     size: '',
     colour: '',
-    min_price: '',
-    max_price: '',
+    min_price: initialMinPrice,
+    max_price: initialMaxPrice,
   })
+  const [priceDraft, setPriceDraft] = useState({ min: initialMinPrice, max: initialMaxPrice })
+  const [priceError, setPriceError] = useState('')
 
   const isNew = path === '/new-arrivals'
   const isShop = path === '/shop'
@@ -56,14 +68,15 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
     setLoading(true)
     const sp = new URLSearchParams()
     if (catSlug) sp.set('category', catSlug)
-    if (isNew) sp.set('new_arrivals', 'true')
+    if (occasion) sp.set('occasion', occasion)
+    if (isNew) sp.set('new', 'true')
     if (sort) sp.set('sort', sort)
-    if (q) sp.set('q', q)
+    if (q) sp.set('search', q)
     if (filters.availability) sp.set('availability', filters.availability)
     if (filters.size) sp.set('size', filters.size)
     if (filters.colour) sp.set('colour', filters.colour)
-    if (filters.min_price) sp.set('min_price', filters.min_price)
-    if (filters.max_price) sp.set('max_price', filters.max_price)
+    if (filters.min_price !== '') sp.set('minPrice', filters.min_price)
+    if (filters.max_price !== '') sp.set('maxPrice', filters.max_price)
 
     api(`/products?${sp.toString()}`)
       .then((res) => {
@@ -74,24 +87,22 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
   }
 
   useEffect(() => {
-    // Read URL search parameter if any
-    if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search)
-      const searchQuery = urlParams.get('search')
-      if (searchQuery) setQ(searchQuery)
-    }
-  }, [])
+    const searchQuery = searchParams.get('search') || ''
+    setQ(searchQuery)
+  }, [searchParams])
 
   useEffect(() => {
     const hasFilters = Object.values(filters).some(Boolean)
-    if (Array.isArray(initialProducts) && sort === 'newest' && !q && !hasFilters) {
+    if (Array.isArray(initialProducts) && sort === 'newest' && !q && !hasFilters && !occasion) {
       setProducts(initialProducts)
       setLoading(false)
       return
     }
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, sort, filters, q, initialProducts])
+  }, [path, sort, filters, q, initialProducts, occasion])
+
+  useEffect(() => { setOccasion(queryOccasion) }, [queryOccasion])
 
   useEffect(() => {
     if (initialCategory) {
@@ -107,12 +118,32 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
     }
   }, [catSlug, initialCategory])
 
-  const title = isNew ? 'Just Dropped' : cat ? cat.name : 'The Complete Edit'
+  const title = isNew ? 'Just Dropped' : cat ? cat.name : occasion ? occasion.replaceAll('-', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'The Complete Edit'
   const sub = isNew
     ? 'The freshest handcrafted drapes and contemporary tops directly from our atelier.'
     : cat
     ? cat.description
     : 'A joyful wardrobe worth getting dressed for. Curated sarees, crop tops, and everyday staples.'
+
+  const applyPriceFilter = () => {
+    const parse = (value) => {
+      if (value === '') return { valid: true, value: '' }
+      const number = Number(value)
+      return { valid: Number.isFinite(number) && number >= 0, value: String(number) }
+    }
+    const min = parse(priceDraft.min)
+    const max = parse(priceDraft.max)
+    if (!min.valid || !max.valid) { setPriceError('Enter valid prices of zero or more.'); return }
+    if (min.value !== '' && max.value !== '' && Number(min.value) > Number(max.value)) { setPriceError('Minimum price cannot be greater than maximum price.'); return }
+    setPriceError('')
+    setFilters((current) => ({ ...current, min_price: min.value, max_price: max.value }))
+  }
+
+  const resetPriceFilter = () => {
+    setPriceDraft({ min: '', max: '' })
+    setPriceError('')
+    setFilters((current) => ({ ...current, min_price: '', max_price: '' }))
+  }
 
   const FilterControls = () => (
     <div className="space-y-6 text-xs">
@@ -176,12 +207,24 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
         />
       </div>
 
+      <div>
+        <Label className="text-[11px] uppercase tracking-[0.2em] text-ink font-bold">Price Range</Label>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <Input type="number" inputMode="decimal" min="0" step="1" value={priceDraft.min} onChange={(event) => { setPriceDraft((current) => ({ ...current, min: event.target.value })); setPriceError('') }} placeholder="Min ₹" aria-label="Minimum price" className="rounded-none border-ink/20 bg-cream text-xs" />
+          <Input type="number" inputMode="decimal" min="0" step="1" value={priceDraft.max} onChange={(event) => { setPriceDraft((current) => ({ ...current, max: event.target.value })); setPriceError('') }} placeholder="Max ₹" aria-label="Maximum price" className="rounded-none border-ink/20 bg-cream text-xs" />
+        </div>
+        {priceError && <p role="alert" className="mt-2 text-[11px] text-coral">{priceError}</p>}
+        <div className="mt-2 flex gap-2"><button type="button" onClick={applyPriceFilter} className="min-h-9 bg-ink px-3 text-[10px] font-bold uppercase tracking-wider text-cream">Apply</button><button type="button" onClick={resetPriceFilter} className="min-h-9 border border-ink/20 px-3 text-[10px] font-bold uppercase tracking-wider text-cocoa">Reset price</button></div>
+      </div>
+
       {/* Clear Filters */}
-      {(filters.availability || filters.size || filters.colour || q) && (
+      {(filters.availability || filters.size || filters.colour || filters.min_price !== '' || filters.max_price !== '' || q) && (
         <button
           type="button"
           onClick={() => {
             setFilters({ availability: '', size: '', colour: '', min_price: '', max_price: '' })
+            setPriceDraft({ min: '', max: '' })
+            setPriceError('')
             setQ('')
           }}
           className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider text-coral hover:underline font-bold pt-2"
@@ -307,6 +350,8 @@ export default function ProductGrid({ navigate, settings, path, addToCart, initi
               <Button
                 onClick={() => {
                   setFilters({ availability: '', size: '', colour: '', min_price: '', max_price: '' })
+                  setPriceDraft({ min: '', max: '' })
+                  setPriceError('')
                   setQ('')
                   setSort('newest')
                 }}

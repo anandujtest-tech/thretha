@@ -12,6 +12,7 @@ import LookbookWall from './LookbookWall'
 import FashionImage, { productImage } from './FashionImage'
 import ErrorBoundary from './ErrorBoundary'
 import { getHomepageContent } from '@/lib/homepageContent'
+import OccasionDiscovery from './OccasionDiscovery'
 
 export default function HomeView({ addToCart, initialData }) {
   const router = useRouter()
@@ -69,6 +70,7 @@ export default function HomeView({ addToCart, initialData }) {
       <ErrorBoundary sectionName="Hero"><FullscreenHero settings={data.settings} /></ErrorBoundary>
       <div className="fashion-intro"><span>{content.intro_left}</span><span>{content.intro_right}</span></div>
       <ErrorBoundary sectionName="Categories"><CategoryDiscovery categories={data.categories} products={imagery} content={content} /></ErrorBoundary>
+      <OccasionDiscovery settings={data.settings} />
       {failed.categories && <div className="fashion-section fashion-data-message" role="status"><p>Categories are temporarily unavailable.</p><button className="fashion-link" type="button" onClick={retry}>Try again <ArrowRight size={15} aria-hidden="true" /></button></div>}
       <ErrorBoundary sectionName="New arrivals"><FeaturedProducts products={data.arrivals} settings={data.settings} addToCart={addToCart} title={content.arrivals_heading} loading={loading} error={failed.arrivals} onRetry={retry} /></ErrorBoundary>
       {edit && <section className="fashion-edit" aria-labelledby="fashion-edit-heading">

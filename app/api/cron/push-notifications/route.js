@@ -1,5 +1,8 @@
 import { MongoClient } from 'mongodb'
 import { ensurePushIndexes, processPushQueue } from '@/lib/pushScheduler'
+import { getAppBaseUrl } from '@/lib/auth'
+import { ensureBackInStockIndexes, processBackInStockSubscriptions } from '@/lib/backInStock'
+import { ensureAbandonedCartIndexes, processAbandonedCartReminders } from '@/lib/abandonedCart'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -14,9 +17,11 @@ async function getDatabase() {
     state.promise = state.client.connect().then(() => state.client.db(process.env.DB_NAME || 'thretha_couture'))
       .catch((error) => { state.promise = null; throw error })
   }
-  const database = await state.promise
-  await ensurePushIndexes(database)
-  return database
+    const database = await state.promise
+    await ensurePushIndexes(database)
+    await ensureBackInStockIndexes(database)
+    await ensureAbandonedCartIndexes(database)
+    return database
 }
 
 export async function GET(request) {
@@ -25,8 +30,19 @@ export async function GET(request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
   try {
-    const result = await processPushQueue(await getDatabase())
-    return Response.json(result)
+    const database = await getDatabase()
+    const [push, backInStock, abandonedCart] = await Promise.all([
+      processPushQueue(database),
+      processBackInStockSubscriptions(database, {
+        appUrl: getAppBaseUrl(request),
+        secret: process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret',
+      }),
+      processAbandonedCartReminders(database, {
+        appUrl: getAppBaseUrl(request),
+        secret: process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret',
+      }),
+    ])
+    return Response.json({ ...push, backInStock, abandonedCart })
   } catch (error) {
     console.error('[Push Cron] Queue processing failed:', error?.message || 'unknown error')
     return Response.json({ error: 'Push queue processing failed' }, { status: 500 })

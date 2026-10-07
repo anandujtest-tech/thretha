@@ -2,21 +2,30 @@
 
 import { useState } from 'react'
 import { ArrowRight, Check, Sparkles } from 'lucide-react'
+import { api } from '@/lib/tc'
 
 export default function Newsletter() {
   const [email, setEmail] = useState('')
   const [subscribed, setSubscribed] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [consent, setConsent] = useState(false)
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!email || !email.includes('@')) return
+    setError('')
+    if (!email || !email.includes('@')) { setError('Enter a valid email address.'); return }
+    if (!consent) { setError('Please consent to receive newsletter emails.'); return }
     setLoading(true)
-    setTimeout(() => {
+    try {
+      await api('/newsletter/subscribe', { method: 'POST', body: { email, consent: true } })
       setLoading(false)
       setSubscribed(true)
       setEmail('')
-    }, 600)
+    } catch (err) {
+      setError(err.message || 'We could not save your subscription. Please try again.')
+      setLoading(false)
+    }
   }
 
   return (
@@ -69,15 +78,19 @@ export default function Newsletter() {
                 <span>{loading ? 'Subscribing…' : 'Subscribe'}</span>
                 <ArrowRight className="h-3.5 w-3.5 shrink-0" />
               </button>
+              <label className="flex basis-full items-start gap-2 pt-2 text-left text-[11px] leading-relaxed text-cocoa sm:order-3">
+                <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-0.5 accent-ink" />
+                <span>I agree to receive Thretha Couture newsletter emails. I can unsubscribe at any time.</span>
+              </label>
             </form>
           )}
 
           <p className="mt-3 text-[10px] text-cocoa/50 font-sans">
             We send thoughtfully spaced dispatches. Never any spam.
           </p>
+          {error && <p role="alert" className="mt-2 text-xs text-coral">{error}</p>}
         </div>
       </div>
     </section>
   )
 }
-

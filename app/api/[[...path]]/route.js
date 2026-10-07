@@ -106,6 +106,13 @@ import {
   normalizePushSubscription,
 } from '../../../lib/pushNotifications.js'
 import { ensurePushIndexes, processPushQueue, suppressDuePushCampaigns } from '../../../lib/pushScheduler.js'
+import { normalizeOccasions, DEFAULT_OCCASIONS } from '../../../lib/occasions.js'
+import { ensureProductReviewIndexes, normalizeReviewText, isCloudinaryImageUrl } from '../../../lib/productReviews.js'
+import { ensureBackInStockIndexes, isVariantAvailable, saveBackInStockSubscription, unsubscribeBackInStockSubscription, verifyBackInStockUnsubscribeToken, verifySignedBackInStockUnsubscribeToken } from '../../../lib/backInStock.js'
+import { ensureAbandonedCartIndexes, createCartKey, getCartRecoveryItems, createCartRecoveryToken, verifyCartRecoveryToken, verifyBackInStockUnsubscribeToken as verifyCartUnsubscribeToken } from '../../../lib/abandonedCart.js'
+import { ensureNewsletterIndexes, createNewsletterUnsubscribeToken, verifyNewsletterUnsubscribeToken, normalizeNewsletterEmail, isValidNewsletterEmail } from '../../../lib/newsletter.js'
+import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
+import { getProductEffectivePrice } from '../../../lib/productInventory.js'
 import { ANALYTICS_DEDUPE_WINDOWS, allowAnalyticsRequest, createAnalyticsDedupeKey, reserveAnalyticsDedupe, validateAnalyticsEntity, validateAnalyticsPayload } from '../../../lib/analyticsProtection.js'
 
 export const runtime = 'nodejs'
@@ -129,6 +136,9 @@ async function connectToMongo() {
       await ensureSeed(database)
       await ensureAuthIndexes(database)
       await ensurePromotionsSeeded(database)
+      await ensureProductReviewIndexes(database)
+      await ensureBackInStockIndexes(database)
+      await ensureAbandonedCartIndexes(database)
       await database.collection('visitor_events').createIndex({ event_name: 1, created_at: 1, product_slug: 1 })
       await database.collection('visitor_event_deduplication').createIndex({ key: 1 }, { unique: true })
       await database.collection('visitor_event_deduplication').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 })
@@ -200,10 +210,24 @@ function slugify(str) {
     .slice(0, 80)
 }
 
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function strip(doc) {
   if (!doc) return doc
   const { _id, password_hash, ...rest } = doc
   return rest
+}
+
+function reviewOrderOwnerFilter(customer) {
+  const owners = [{ userId: customer.id }]
+  const email = String(customer.email || '').trim()
+  if (email.includes('@')) {
+    const escaped = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    owners.push({ userId: null, 'customer.email': { $regex: new RegExp(`^${escaped}$`, 'i') } })
+  }
+  return { $or: owners }
 }
 
 function createSafeRedirect(targetPath, request) {
@@ -1086,6 +1110,157 @@ async function handleRoute(request, { params }) {
     }
     if (route === '/health' && method === 'GET') return json({ ok: true })
 
+    if (route === '/newsletter/subscribe' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const email = normalizeNewsletterEmail(body.email)
+      if (body.consent !== true) return json({ error: 'Please consent to receive newsletter emails.' }, 400)
+      if (!isValidNewsletterEmail(email)) return json({ error: 'Enter a valid email address.' }, 400)
+      const ipKey = crypto.createHash('sha256').update(getClientIp(request)).digest('hex')
+      const rate = await checkRateLimit(database, `newsletter:${ipKey}`, 5, 60)
+      if (!rate.allowed) return json({ error: 'Please wait before trying another subscription.' }, 429)
+      const subscribers = database.collection('newsletter_subscribers')
+      await ensureNewsletterIndexes(database)
+      let subscriber = await subscribers.findOne({ email_normalized: email })
+      const now = new Date()
+      const alreadySubscribed = subscriber?.status === 'active'
+      if (subscriber && !alreadySubscribed) {
+        await subscribers.updateOne({ id: subscriber.id }, { $set: { status: 'active', consented_at: now, updated_at: now, source: 'storefront' }, $unset: { unsubscribed_at: '' } })
+      } else if (!subscriber) {
+        subscriber = { id: uuidv4(), email_normalized: email, status: 'active', source: 'storefront', consented_at: now, created_at: now, updated_at: now }
+        try { await subscribers.insertOne(subscriber) }
+        catch (error) {
+          if (error?.code !== 11000) throw error
+          const duplicate = await subscribers.findOne({ email_normalized: email })
+          if (!duplicate) throw error
+          if (duplicate.status !== 'active') await subscribers.updateOne({ id: duplicate.id }, { $set: { status: 'active', consented_at: now, updated_at: now, source: 'storefront' }, $unset: { unsubscribed_at: '' } })
+          subscriber = duplicate
+        }
+      }
+      const unsubscribeToken = createNewsletterUnsubscribeToken(subscriber.id, JWT_SECRET)
+      const unsubscribeUrl = `${getAppBaseUrl(request)}/newsletter/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
+      let unsubscribeEmailSent = false
+      try {
+        await sendEmail({
+          to: email,
+          subject: 'You are subscribed to The Thretha Edit',
+          text: `Thank you for subscribing to The Thretha Edit. You can unsubscribe at any time: ${unsubscribeUrl}`,
+          html: `<p>Thank you for subscribing to The Thretha Edit.</p><p><a href="${unsubscribeUrl}">Unsubscribe at any time</a></p>`,
+          idempotencyKey: `newsletter-welcome/${subscriber.id}/${now.getTime()}`,
+        })
+        unsubscribeEmailSent = true
+      } catch {
+        // Subscription persistence succeeds independently; Admin can still unsubscribe the record.
+      }
+      return json({ ok: true, alreadySubscribed, unsubscribeEmailSent, message: alreadySubscribed ? 'You are already subscribed to The Thretha Edit.' : 'You are subscribed to The Thretha Edit.' }, alreadySubscribed ? 200 : 201)
+    }
+
+    if (route === '/newsletter/unsubscribe' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const id = verifyNewsletterUnsubscribeToken(body.token, JWT_SECRET)
+      if (!id) return json({ error: 'This unsubscribe link is invalid or has expired.' }, 400)
+      const subscribers = database.collection('newsletter_subscribers')
+      const existing = await subscribers.findOne({ id }, { projection: { status: 1 } })
+      if (!existing) return json({ error: 'This subscription could not be found.' }, 404)
+      if (existing.status !== 'unsubscribed') {
+        await subscribers.updateOne({ id, status: 'active' }, { $set: { status: 'unsubscribed', unsubscribed_at: new Date(), updated_at: new Date() } })
+      }
+      return json({ ok: true, unsubscribed: true })
+    }
+
+    if (route === '/back-in-stock/subscribe' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      if (body.consent !== true) return json({ error: 'Please consent to receive a back-in-stock email.' }, 400)
+      const email = String(body.email || '').trim().toLowerCase()
+      const slug = String(body.product_slug || '').trim().slice(0, 100)
+      const size = String(body.size || '').trim().slice(0, 40)
+      if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: 'Enter a valid email address.' }, 400)
+      const product = await database.collection('products').findOne({ slug, active: { $ne: false } }, { projection: { id: 1, slug: 1, stock: 1, sizes: 1 } })
+      if (!product) return json({ error: 'Product not found.' }, 404)
+      if (isVariantAvailable(product, size)) return json({ error: 'This item is currently available.' }, 409)
+      if (size && !(product.sizes || []).some((variant) => String(variant?.size || '').toLowerCase() === size.toLowerCase())) return json({ error: 'Select a valid product size.' }, 400)
+      const ipKey = crypto.createHash('sha256').update(getClientIp(request)).digest('hex')
+      const emailKey = crypto.createHash('sha256').update(email).digest('hex')
+      const rate = await checkRateLimit(database, `back_in_stock:${ipKey}:${emailKey}`, 5, 60)
+      if (!rate.allowed) return json({ error: 'Please wait before requesting another stock alert.' }, 429)
+      const saved = await saveBackInStockSubscription(database, { product, email, size, consent: body.consent })
+      if (!saved.ok) return json({ error: saved.error }, saved.status)
+      return json({ ok: true, message: 'We will email you when this piece is available.' }, 201)
+    }
+
+    if (route === '/back-in-stock/unsubscribe' && method === 'GET') {
+      const token = new URL(request.url).searchParams.get('token') || ''
+      const id = verifySignedBackInStockUnsubscribeToken(token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      if (!id) return json({ error: 'Unsubscribe link is invalid or expired.' }, 400)
+      const subscription = await database.collection('back_in_stock_subscriptions').findOne({ id }, { projection: { _id: 1 } })
+      if (!subscription) return json({ error: 'This stock alert could not be found.' }, 404)
+      return json({ ok: true, valid: true })
+    }
+
+    if (route === '/back-in-stock/unsubscribe' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const id = verifySignedBackInStockUnsubscribeToken(body.token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      if (!id) return json({ error: 'Unsubscribe link is invalid or expired.' }, 400)
+      const result = await unsubscribeBackInStockSubscription(database, id)
+      if (!result.found) return json({ error: 'This stock alert could not be found.' }, 404)
+      return json({ ok: true, unsubscribed: true })
+    }
+
+    if (route === '/abandoned-cart/subscribe' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const email = String(body.email || '').trim().toLowerCase()
+      if (body.consent !== true) return json({ error: 'Please consent to receive a cart reminder.' }, 400)
+      if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: 'Enter a valid email address.' }, 400)
+      if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > 20) return json({ error: 'Your bag could not be saved for a reminder.' }, 400)
+      const ids = [...new Set(body.items.map((item) => String(item?.product_id || '')).filter((id) => /^[a-zA-Z0-9_-]{1,100}$/.test(id)))].slice(0, 20)
+      if (!ids.length) return json({ error: 'Cart reminders are available for product pieces only.' }, 400)
+      const productList = await database.collection('products').find({ id: { $in: ids }, active: { $ne: false } }, { projection: { id: 1, slug: 1, name: 1 } }).toArray()
+      const byId = new Map(productList.map((product) => [String(product.id), product]))
+      const items = body.items.flatMap((item) => {
+        const product = byId.get(String(item?.product_id || ''))
+        if (!product) return []
+        const quantity = Math.max(1, Math.min(10, Math.floor(Number(item.quantity) || 1)))
+        return [{ id: product.id, name: product.name, path: `/product/${encodeURIComponent(product.slug)}`, size: String(item.size || '').slice(0, 40), quantity }]
+      }).slice(0, 20)
+      if (!items.length) return json({ error: 'Those products are no longer available.' }, 409)
+      const ipKey = crypto.createHash('sha256').update(getClientIp(request)).digest('hex')
+      const emailKey = crypto.createHash('sha256').update(email).digest('hex')
+      const rate = await checkRateLimit(database, `abandoned_cart:${ipKey}:${emailKey}`, 3, 1440)
+      if (!rate.allowed) return json({ error: 'Please wait before requesting another cart reminder.' }, 429)
+      const cartKey = createCartKey(email, items)
+      const collection = database.collection('abandoned_cart_reminders')
+      const existing = await collection.findOne({ cart_key: cartKey })
+      const now = new Date()
+      if (existing?.status === 'sent' || existing?.status === 'converted') return json({ ok: true, message: 'A reminder was already sent for this bag.' })
+      if (existing) {
+        await collection.updateOne({ id: existing.id, status: { $nin: ['sent', 'converted'] } }, { $set: { status: 'pending', email, email_normalized: email, items, consented_at: now, last_activity_at: now, remind_after: new Date(now.getTime() + 2 * 60 * 60 * 1000), delivery_key: crypto.randomUUID(), attempts: 0, updated_at: now }, $unset: { claimed_at: '', claim_token: '', retry_after: '', failed_at: '', last_error: '', closed_reason: '', closed_at: '' } })
+      } else {
+        const reminder = { id: uuidv4(), cart_key: cartKey, email, email_normalized: email, items, consented_at: now, created_at: now, last_activity_at: now, remind_after: new Date(now.getTime() + 2 * 60 * 60 * 1000), status: 'pending', attempts: 0, delivery_key: crypto.randomUUID(), created_via: 'explicit_cart_consent' }
+        try { await collection.insertOne(reminder) } catch (error) {
+          if (error?.code !== 11000) throw error
+          await collection.updateOne({ cart_key: cartKey, status: { $nin: ['sent', 'converted'] } }, { $set: { status: 'pending', consented_at: now, last_activity_at: now, remind_after: new Date(now.getTime() + 2 * 60 * 60 * 1000), delivery_key: crypto.randomUUID(), attempts: 0 }, $unset: { retry_after: '', failed_at: '', last_error: '', closed_reason: '', closed_at: '' } })
+        }
+      }
+      return json({ ok: true, message: 'We will send one reminder if this bag is still waiting in two hours.' }, 201)
+    }
+
+    if (route === '/abandoned-cart/unsubscribe' && method === 'GET') {
+      const token = new URL(request.url).searchParams.get('token') || ''
+      const id = verifyCartUnsubscribeToken(token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      if (!id) return json({ error: 'Unsubscribe link is invalid or expired.' }, 400)
+      const result = await database.collection('abandoned_cart_reminders').updateOne({ id, status: { $ne: 'unsubscribed' } }, { $set: { status: 'unsubscribed', unsubscribed_at: new Date(), updated_at: new Date() } })
+      return json({ ok: true, unsubscribed: result.matchedCount > 0 })
+    }
+
+    if (route === '/abandoned-cart/recover' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const id = verifyCartRecoveryToken(body.token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      if (!id) return json({ error: 'This cart recovery link is invalid or has expired.' }, 400)
+      const items = await getCartRecoveryItems(database, id)
+      if (!items) return json({ error: 'This cart can no longer be restored.' }, 404)
+      if (!items.length) return json({ error: 'None of the saved pieces are currently available.' }, 409)
+      return json({ items })
+    }
+
     // Helper to format settings consistently with robust shipping fields
     const normalizeSettingsDoc = (s) => {
       const stripped = strip(s) || {}
@@ -1125,6 +1300,11 @@ async function handleRoute(request, { params }) {
       stripped.pwa = {
         install_prompt_enabled: s?.pwa?.install_prompt_enabled !== false,
       }
+      stripped.reviews = { enabled: s?.reviews?.enabled !== false }
+      stripped.shop_by_occasion = {
+        enabled: s?.shop_by_occasion?.enabled !== false,
+        occasions: normalizeOccasions(s?.shop_by_occasion?.occasions ?? DEFAULT_OCCASIONS),
+      }
       stripped.checkout = getCheckoutAvailability(s)
       return stripped
     }
@@ -1135,10 +1315,158 @@ async function handleRoute(request, { params }) {
       return json(normalizeSettingsDoc(s), 200, { 'Cache-Control': 'no-store, max-age=0' })
     }
 
+    if (route === '/occasions' && method === 'GET') {
+      const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { shop_by_occasion: 1 } })
+      if (settings?.shop_by_occasion?.enabled === false) return json({ enabled: false, occasions: [] })
+      return json({ enabled: true, occasions: normalizeOccasions(settings?.shop_by_occasion?.occasions ?? DEFAULT_OCCASIONS).filter((occasion) => occasion.active) })
+    }
+
     // ===== PUBLIC INSTAGRAM FEED =====
     if (route === '/instagram/feed' && method === 'GET') {
       const feed = await getStorefrontInstagramFeed(database)
       return json(feed)
+    }
+
+    // ===== PRODUCT REVIEWS =====
+    if (route === '/reviews/eligible' && method === 'GET') {
+      const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { reviews: 1 } })
+      if (settings?.reviews?.enabled === false) return json({ error: 'Product reviews are currently disabled.', code: 'REVIEWS_DISABLED' }, 403)
+      const customer = await getCustomerFromRequest(request, database)
+      if (!customer) return json({ error: 'Sign in to check review eligibility.' }, 401)
+      const slug = String(new URL(request.url).searchParams.get('product') || '').trim().slice(0, 100)
+      const product = await database.collection('products').findOne({ slug, active: { $ne: false } }, { projection: { id: 1 } })
+      if (!product) return json({ error: 'Product not found.' }, 404)
+      const orders = await database.collection('orders').find({
+        $and: [reviewOrderOwnerFilter(customer), { $or: [{ payment_status: 'PAID' }, { status: 'DELIVERED' }] }, { 'items.product_id': product.id }],
+      }, { projection: { _id: 0, id: 1, order_number: 1 } }).sort({ created_at: -1 }).limit(30).toArray()
+      const reviewed = await database.collection('product_reviews').find({ user_id: customer.id, product_id: product.id }, { projection: { order_id: 1 } }).toArray()
+      const reviewedIds = new Set(reviewed.map((review) => review.order_id))
+      return json({ orders: orders.filter((order) => !reviewedIds.has(order.id)).map((order) => ({ id: order.id, order_number: order.order_number || order.id })) })
+    }
+    if (route === '/reviews/mine' && method === 'GET') {
+      const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { reviews: 1 } })
+      if (settings?.reviews?.enabled === false) return json({ error: 'Product reviews are currently disabled.', code: 'REVIEWS_DISABLED' }, 403)
+      const customer = await getCustomerFromRequest(request, database)
+      if (!customer) return json({ error: 'Sign in to manage your reviews.' }, 401)
+      const slug = String(new URL(request.url).searchParams.get('product') || '').trim().slice(0, 100)
+      const product = await database.collection('products').findOne({ slug }, { projection: { id: 1 } })
+      if (!product) return json({ error: 'Product not found.' }, 404)
+      const review = await database.collection('product_reviews').findOne({ user_id: customer.id, product_id: product.id }, { projection: { _id: 0 } })
+      return json({ review: review || null })
+    }
+    if (route === '/reviews' && method === 'GET') {
+      const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { reviews: 1 } })
+      if (settings?.reviews?.enabled === false) return json({ enabled: false, count: 0, average: 0, distribution: [], reviews: [] })
+      const slug = String(new URL(request.url).searchParams.get('product') || '').trim().slice(0, 100)
+      if (!slug) return json({ error: 'Product is required.' }, 400)
+      const product = await database.collection('products').findOne({ slug, active: { $ne: false } }, { projection: { id: 1, slug: 1 } })
+      if (!product) return json({ error: 'Product not found.' }, 404)
+      const [reviews, reviewStats, count] = await Promise.all([
+        database.collection('product_reviews').find(
+        { product_id: product.id, status: 'approved' },
+        { projection: { _id: 0, id: 1, rating: 1, text: 1, photo_url: 1, verified_purchase: 1, customer_name: 1, created_at: 1 } }
+        ).sort({ created_at: -1 }).limit(50).toArray(),
+        database.collection('product_reviews').aggregate([
+          { $match: { product_id: product.id, status: 'approved' } },
+          { $group: { _id: '$rating', count: { $sum: 1 } } },
+        ]).toArray(),
+        database.collection('product_reviews').countDocuments({ product_id: product.id, status: 'approved' }),
+      ])
+      const ratingCount = new Map(reviewStats.map((row) => [Number(row._id), row.count]))
+      const ratingTotal = reviewStats.reduce((sum, row) => sum + Number(row._id) * row.count, 0)
+      const average = count ? Math.round((ratingTotal / count) * 10) / 10 : 0
+      const distribution = [5, 4, 3, 2, 1].map((rating) => ({ rating, count: ratingCount.get(rating) || 0 }))
+      return json({ enabled: true, count, average, distribution, reviews })
+    }
+
+    if (route === '/reviews' && method === 'POST') {
+      const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { reviews: 1 } })
+      if (settings?.reviews?.enabled === false) return json({ error: 'Product reviews are currently disabled.', code: 'REVIEWS_DISABLED' }, 403)
+      const customer = await getCustomerFromRequest(request, database)
+      if (!customer) return json({ error: 'Sign in to submit a product review.' }, 401)
+      const body = await request.json().catch(() => ({}))
+      const productSlug = String(body.product_slug || '').trim().slice(0, 100)
+      const orderRef = String(body.order_number || '').trim().slice(0, 80)
+      const rating = Number(body.rating)
+      const text = normalizeReviewText(body.text)
+      if (!productSlug || !orderRef || !Number.isInteger(rating) || rating < 1 || rating > 5 || text.length < 8) {
+        return json({ error: 'Choose a rating, enter at least 8 characters, and select an eligible order.' }, 400)
+      }
+      if (body.photo_url && !isCloudinaryImageUrl(body.photo_url, customer.id)) return json({ error: 'Review photos must be uploaded to your secure review image folder.' }, 400)
+      const reviewLimit = await checkRateLimit(database, `product_review:${customer.id}`, 5, 1440)
+      if (!reviewLimit.allowed) return json({ error: 'You have reached the daily review submission limit.' }, 429)
+      const product = await database.collection('products').findOne({ slug: productSlug, active: { $ne: false } }, { projection: { id: 1, slug: 1, name: 1 } })
+      if (!product) return json({ error: 'Product not found.' }, 404)
+      const order = await database.collection('orders').findOne({
+        $and: [
+          { $or: [{ id: orderRef }, { order_number: orderRef }] },
+          reviewOrderOwnerFilter(customer),
+          { $or: [{ payment_status: 'PAID' }, { status: 'DELIVERED' }] },
+          { 'items.product_id': product.id },
+        ],
+      }, { projection: { id: 1, order_number: 1, items: 1 } })
+      if (!order) return json({ error: 'A completed purchase of this product in your account is required.' }, 403)
+      const item = (order.items || []).find((entry) => String(entry.product_id) === String(product.id))
+      const doc = {
+        id: uuidv4(), product_id: product.id, product_slug: product.slug, product_name: product.name,
+        user_id: customer.id, order_id: order.id, order_number: order.order_number || order.id,
+        customer_name: customer.name || 'Thretha customer', rating, text,
+        photo_url: body.photo_url || null, verified_purchase: true, status: 'pending',
+        variant: { size: item?.size || null, colour: item?.colour || null },
+        created_at: new Date(), updated_at: new Date(),
+      }
+      try {
+        await database.collection('product_reviews').insertOne(doc)
+      } catch (error) {
+        if (error?.code === 11000) return json({ error: 'You have already reviewed this product for this order.' }, 409)
+        throw error
+      }
+      return json({ ok: true, review: { id: doc.id, status: 'pending' }, status: 'pending', message: 'Thank you. Your review will appear after moderation.' }, 201)
+    }
+
+    if (route === '/reviews/photo/signature' && method === 'POST') {
+      const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { reviews: 1 } })
+      if (settings?.reviews?.enabled === false) return json({ error: 'Product reviews are currently disabled.', code: 'REVIEWS_DISABLED' }, 403)
+      const customer = await getCustomerFromRequest(request, database)
+      if (!customer) return json({ error: 'Sign in to upload a review photo.' }, 401)
+      if (!cloudinaryEnabled()) return json({ error: 'Review photo uploads are unavailable.' }, 503)
+      const body = await request.json().catch(() => ({}))
+      const productSlug = String(body.product_slug || '').trim().slice(0, 100)
+      const orderRef = String(body.order_number || '').trim().slice(0, 80)
+      const product = await database.collection('products').findOne({ slug: productSlug, active: { $ne: false } }, { projection: { id: 1 } })
+      const eligible = product && await database.collection('orders').findOne({
+        $and: [
+          { $or: [{ id: orderRef }, { order_number: orderRef }] }, reviewOrderOwnerFilter(customer),
+          { $or: [{ payment_status: 'PAID' }, { status: 'DELIVERED' }] }, { 'items.product_id': product.id },
+        ],
+      }, { projection: { _id: 1 } })
+      if (!eligible) return json({ error: 'A completed purchase of this product in your account is required.' }, 403)
+      const folder = `thretha/reviews/${String(customer.id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60)}`
+      const timestamp = Math.floor(Date.now() / 1000)
+      const signature = cloudinary.utils.api_sign_request({ folder, timestamp }, process.env.CLOUDINARY_API_SECRET)
+      return json({ cloud_name: process.env.CLOUDINARY_CLOUD_NAME, api_key: process.env.CLOUDINARY_API_KEY, timestamp, folder, resource_type: 'image', signature })
+    }
+
+    if (parts[0] === 'reviews' && parts[1] && (method === 'PATCH' || method === 'DELETE')) {
+      const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { reviews: 1 } })
+      if (settings?.reviews?.enabled === false) return json({ error: 'Product reviews are currently disabled.', code: 'REVIEWS_DISABLED' }, 403)
+      const customer = await getCustomerFromRequest(request, database)
+      if (!customer) return json({ error: 'Sign in to manage your review.' }, 401)
+      const collection = database.collection('product_reviews')
+      const filter = { id: parts[1], user_id: customer.id }
+      const existing = await collection.findOne(filter)
+      if (!existing) return json({ error: 'Review not found.' }, 404)
+      if (method === 'DELETE') {
+        await collection.deleteOne(filter)
+        return json({ ok: true })
+      }
+      const body = await request.json().catch(() => ({}))
+      const rating = Number(body.rating)
+      const text = normalizeReviewText(body.text)
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5 || text.length < 8) return json({ error: 'Choose a rating and enter at least 8 characters.' }, 400)
+      if (body.photo_url && !isCloudinaryImageUrl(body.photo_url, customer.id)) return json({ error: 'Review photos must be uploaded to your secure review image folder.' }, 400)
+      await collection.updateOne(filter, { $set: { rating, text, photo_url: body.photo_url || null, status: 'pending', updated_at: new Date() } })
+      return json({ ok: true, status: 'pending' })
     }
 
     // ===== PUBLIC VIRTUAL TRY-ON =====
@@ -1292,6 +1620,19 @@ async function handleRoute(request, { params }) {
       const url = new URL(request.url)
       const q = url.searchParams
       const filter = { active: true }
+      if (q.get('slugs')) {
+        const slugs = [...new Set(q.get('slugs').split(',').map((value) => value.trim()).filter((value) => /^[a-z0-9-]{1,100}$/i.test(value)))].slice(0, 12)
+        if (!slugs.length) return json([])
+        filter.slug = { $in: slugs }
+      }
+      if (q.get('occasion')) {
+        const occasionSettings = await database.collection('settings').findOne({ id: 'global' }, { projection: { shop_by_occasion: 1 } })
+        if (occasionSettings?.shop_by_occasion?.enabled === false) return json([])
+        const occasion = normalizeOccasions(occasionSettings?.shop_by_occasion?.occasions ?? DEFAULT_OCCASIONS)
+          .find((item) => item.active && item.slug === q.get('occasion'))
+        if (!occasion) return json([])
+        filter.occasion_slugs = occasion.slug
+      }
       if (q.get('category')) {
         const cat = await database.collection('categories').findOne({ slug: q.get('category') })
         if (cat) filter.category_id = cat.id
@@ -1300,22 +1641,22 @@ async function handleRoute(request, { params }) {
       if (q.get('new') === 'true') filter.new_arrival = true
       if (q.get('featured') === 'true') filter.featured = true
       if (q.get('colour')) filter.colour = { $regex: q.get('colour'), $options: 'i' }
-      if (q.get('search')) {
-        const rx = { $regex: q.get('search'), $options: 'i' }
+      const search = normalizeSearchTerm(q.get('search'))
+      if (search) {
+        const rx = { $regex: escapeSearchTerm(search), $options: 'i' }
         filter.$or = [{ name: rx }, { sku: rx }, { category_name: rx }, { colour: rx }]
       }
-      const min = q.get('minPrice'); const max = q.get('maxPrice')
-      if (min || max) {
-        filter.price = {}
-        if (min) filter.price.$gte = Number(min)
-        if (max) filter.price.$lte = Number(max)
-      }
+      const priceRange = parsePriceRange(q.get('minPrice'), q.get('maxPrice'))
+      if (!priceRange.valid) return json({ error: priceRange.error }, 400)
       let list = await database.collection('products').find(filter).toArray()
-      if (q.get('availability') === 'in') list = list.filter((p) => p.stock > 0)
-      if (q.get('size')) list = list.filter((p) => (p.sizes || []).some((s) => s.size === q.get('size') && s.available))
+      list = filterProductsByPriceAndAvailability(list, {
+        priceRange,
+        availability: q.get('availability'),
+        size: q.get('size') || '',
+      })
       const sort = q.get('sort')
-      if (sort === 'price_asc') list.sort((a, b) => (a.discount_price || a.price) - (b.discount_price || b.price))
-      else if (sort === 'price_desc') list.sort((a, b) => (b.discount_price || b.price) - (a.discount_price || a.price))
+      if (sort === 'price_asc') list.sort((a, b) => getProductEffectivePrice(a) - getProductEffectivePrice(b))
+      else if (sort === 'price_desc') list.sort((a, b) => getProductEffectivePrice(b) - getProductEffectivePrice(a))
       else if (sort === 'featured') list.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0))
       else list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       return json(list.map(strip))
@@ -3148,6 +3489,71 @@ async function handleRoute(request, { params }) {
       const auth = requireAuth(request)
       if (!auth) return json({ error: 'Unauthorized' }, 401)
 
+      if (route === '/admin/newsletter-subscribers' && method === 'GET') {
+        const url = new URL(request.url)
+        const status = url.searchParams.get('status') || 'all'
+        if (!['all', 'active', 'unsubscribed'].includes(status)) return json({ error: 'Invalid subscriber status filter.' }, 400)
+        const search = String(url.searchParams.get('q') || '').trim().slice(0, 120)
+        const filter = { ...(status === 'all' ? {} : { status }), ...(search ? { email_normalized: { $regex: escapeRegex(search), $options: 'i' } } : {}) }
+        const subscribers = database.collection('newsletter_subscribers')
+        if (url.searchParams.get('export') === 'csv') {
+          const active = await subscribers.find({ status: 'active', ...(search ? { email_normalized: { $regex: escapeRegex(search), $options: 'i' } } : {}) }, { projection: { _id: 0, email_normalized: 1, consented_at: 1, created_at: 1 } }).sort({ created_at: -1 }).toArray()
+          const quote = (value) => `"${String(value ?? '').replace(/[\r\n]/g, ' ').replace(/"/g, '""')}"`
+          const protectCsv = (value) => /^[=+@\-\t\r]/.test(String(value || '')) ? `'${value}` : value
+          const rows = [['email', 'consented_at', 'created_at'], ...active.map((item) => [protectCsv(item.email_normalized), item.consented_at?.toISOString?.() || '', item.created_at?.toISOString?.() || ''])]
+          return cors(new Response(rows.map((row) => row.map(quote).join(',')).join('\r\n'), { status: 200, headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="thretha-newsletter-subscribers.csv"', 'Cache-Control': 'no-store' } }))
+        }
+        const rawPage = Number(url.searchParams.get('page') || 1)
+        const page = Number.isInteger(rawPage) ? Math.max(1, rawPage) : 1
+        const limit = 50
+        const [items, total, activeCount, unsubscribedCount] = await Promise.all([
+          subscribers.find(filter, { projection: { _id: 0, id: 1, email_normalized: 1, status: 1, source: 1, consented_at: 1, unsubscribed_at: 1, created_at: 1, updated_at: 1 } }).sort({ created_at: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
+          subscribers.countDocuments(filter),
+          subscribers.countDocuments({ status: 'active' }),
+          subscribers.countDocuments({ status: 'unsubscribed' }),
+        ])
+        return json({ subscribers: items, total, activeCount, unsubscribedCount, page, pages: Math.max(1, Math.ceil(total / limit)) })
+      }
+      if (parts[0] === 'admin' && parts[1] === 'newsletter-subscribers' && parts[2] && method === 'PATCH') {
+        const body = await request.json().catch(() => ({}))
+        if (body.action !== 'unsubscribe') return json({ error: 'Unsupported subscriber action.' }, 400)
+        const now = new Date()
+        const result = await database.collection('newsletter_subscribers').updateOne(
+          { id: parts[2], status: { $ne: 'unsubscribed' } },
+          { $set: { status: 'unsubscribed', unsubscribed_at: now, updated_at: now } },
+        )
+        const existing = result.matchedCount ? null : await database.collection('newsletter_subscribers').findOne({ id: parts[2] }, { projection: { status: 1 } })
+        if (!result.matchedCount && !existing) return json({ error: 'Subscriber not found.' }, 404)
+        return json({ ok: true, status: 'unsubscribed' })
+      }
+
+      if (route === '/admin/reviews' && method === 'GET') {
+        const status = String(new URL(request.url).searchParams.get('status') || 'all')
+        const filter = status === 'all' ? {} : { status }
+        const reviews = await database.collection('product_reviews').find(filter).sort({ created_at: -1 }).limit(200).toArray()
+        return json(reviews.map(strip))
+      }
+      if (parts[0] === 'admin' && parts[1] === 'reviews' && parts[2] && method === 'PATCH') {
+        const body = await request.json().catch(() => ({}))
+        const update = { updated_at: new Date() }
+        if (body.status !== undefined) {
+          if (!['pending', 'approved', 'rejected', 'hidden'].includes(body.status)) return json({ error: 'Invalid review status.' }, 400)
+          update.status = body.status
+        }
+        if (body.remove_photo === true) update.photo_url = null
+        if (Object.keys(update).length === 1) return json({ error: 'No moderation changes provided.' }, 400)
+        const result = await database.collection('product_reviews').updateOne({ id: parts[2] }, { $set: update })
+        if (!result.matchedCount) return json({ error: 'Review not found.' }, 404)
+        return json({ ok: true })
+      }
+      if (parts[0] === 'admin' && parts[1] === 'reviews' && parts[2] && method === 'DELETE') {
+        const result = await database.collection('product_reviews').updateOne(
+          { id: parts[2] }, { $set: { status: 'hidden', removed_at: new Date(), updated_at: new Date() } }
+        )
+        if (!result.matchedCount) return json({ error: 'Review not found.' }, 404)
+        return json({ ok: true })
+      }
+
       if (route === '/admin/media/signature' && method === 'POST') {
         if (!cloudinaryEnabled()) return json({ error: 'Cloudinary uploads are not configured.' }, 503)
 
@@ -3243,6 +3649,33 @@ async function handleRoute(request, { params }) {
         })
       }
 
+      if (route === '/admin/product-performance' && method === 'GET') {
+        const rawDays = Number(new URL(request.url).searchParams.get('days') || 30)
+        const days = Number.isInteger(rawDays) ? Math.max(1, Math.min(90, rawDays)) : 30
+        const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+        const [products, events, purchases] = await Promise.all([
+          database.collection('products').find({ active: { $ne: false } }, { projection: { _id: 0, id: 1, slug: 1, name: 1 } }).sort({ name: 1 }).toArray(),
+          database.collection('visitor_events').aggregate([
+            { $match: { created_at: { $gte: since }, event_name: { $in: ['product_view', 'add_to_cart', 'checkout_started'] }, product_slug: { $type: 'string' } } },
+            { $group: { _id: { slug: '$product_slug', event: '$event_name' }, count: { $sum: 1 } } },
+          ]).toArray(),
+          database.collection('orders').aggregate([
+            { $match: { created_at: { $gte: since }, $or: [{ payment_status: 'PAID' }, { status: 'DELIVERED' }] } },
+            { $unwind: '$items' },
+            { $group: { _id: '$items.product_id', orders: { $addToSet: '$id' }, units: { $sum: { $ifNull: ['$items.quantity', 1] } } } },
+          ]).toArray(),
+        ])
+        const eventMap = new Map(events.map((event) => [`${event._id.slug}:${event._id.event}`, event.count]))
+        const purchaseMap = new Map(purchases.map((row) => [String(row._id), { orders: row.orders.filter(Boolean).length, units: row.units }]))
+        return json({ days, products: products.map((product) => {
+          const views = eventMap.get(`${product.slug}:product_view`) || 0
+          const carts = eventMap.get(`${product.slug}:add_to_cart`) || 0
+          const checkouts = eventMap.get(`${product.slug}:checkout_started`) || 0
+          const purchase = purchaseMap.get(String(product.id)) || { orders: 0, units: 0 }
+          return { ...product, views, add_to_bag: carts, checkout_started: checkouts, orders: purchase.orders, conversion: views ? Math.round(purchase.orders / views * 10000) / 100 : 0 }
+        }) })
+      }
+
       // ---- Admin products ----
       if (route === '/admin/products' && method === 'GET') {
         const list = await database.collection('products').find({}).sort({ created_at: -1 }).toArray()
@@ -3266,6 +3699,7 @@ async function handleRoute(request, { params }) {
           stock: Number(b.stock) || 0,
           sizes: Array.isArray(b.sizes) ? b.sizes : [],
           media: Array.isArray(b.media) ? b.media : [],
+          occasion_slugs: Array.isArray(b.occasion_slugs) ? [...new Set(b.occasion_slugs.filter((slug) => typeof slug === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)))].slice(0, 30) : [],
           featured: !!b.featured, new_arrival: !!b.new_arrival, best_seller: !!b.best_seller,
           active: b.active !== false,
           created_at: new Date(), updated_at: new Date(),
@@ -3279,6 +3713,12 @@ async function handleRoute(request, { params }) {
           const b = await request.json()
           const update = { ...b, updated_at: new Date() }
           delete update.id; delete update._id
+          if (b.occasion_slugs !== undefined) {
+            if (!Array.isArray(b.occasion_slugs) || b.occasion_slugs.some((slug) => typeof slug !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))) {
+              return json({ error: 'Product occasions are invalid.' }, 400)
+            }
+            update.occasion_slugs = [...new Set(b.occasion_slugs)].slice(0, 30)
+          }
           if (b.name) update.slug = slugify(b.name)
           if (b.category_id) {
             const cat = await database.collection('categories').findOne({ id: b.category_id })
@@ -3531,6 +3971,20 @@ async function handleRoute(request, { params }) {
 
         if (b.pwa?.install_prompt_enabled !== undefined && typeof b.pwa.install_prompt_enabled !== 'boolean') {
           return json({ error: 'PWA install prompt setting must be enabled or disabled.' }, 400)
+        }
+        for (const [key, label] of [['reviews', 'Reviews'], ['shop_by_occasion', 'Shop by Occasion']]) {
+          if (b[key] !== undefined && (!b[key] || typeof b[key] !== 'object' || Array.isArray(b[key]))) {
+            return json({ error: `${label} settings must be an object.` }, 400)
+          }
+          if (b[key]?.enabled !== undefined && typeof b[key].enabled !== 'boolean') {
+            return json({ error: `${label} must be enabled or disabled.` }, 400)
+          }
+        }
+        if (b.shop_by_occasion?.occasions !== undefined) {
+          if (!Array.isArray(b.shop_by_occasion.occasions)) return json({ error: 'Occasions must be a list.' }, 400)
+          const normalizedOccasions = normalizeOccasions(b.shop_by_occasion.occasions)
+          if (normalizedOccasions.length !== b.shop_by_occasion.occasions.length) return json({ error: 'Each occasion needs a unique, valid name and URL key.' }, 400)
+          b.shop_by_occasion.occasions = normalizedOccasions
         }
 
         if (b.shipping) {

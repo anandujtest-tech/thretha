@@ -1,8 +1,9 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { getWishlist, toggleWishlist as toggleWishlistStorage, inWishlist as inWishlistStorage, api } from '@/lib/tc'
 import { trackVisitorEvent } from '@/lib/visitorAnalytics'
+import { getProductAvailableStock } from '@/lib/productInventory'
 
 const CartContext = createContext(null)
 
@@ -163,8 +164,9 @@ export function CartProvider({ children }) {
               )
 
               // If product exists and has available stock
-              if (liveProduct && (liveProduct.stock ?? 0) > 0) {
-                const currentStock = Math.max(1, Number(liveProduct.stock) || 1)
+              const availableStock = liveProduct ? getProductAvailableStock(liveProduct, item.size) : 0
+              if (liveProduct && liveProduct.active !== false && availableStock > 0) {
+                const currentStock = Math.max(1, availableStock)
                 const currentPrice = Number(liveProduct.discount_price || liveProduct.price) || 0
                 const clampedQty = Math.min(Math.max(1, item.quantity), currentStock)
 
@@ -228,14 +230,13 @@ export function CartProvider({ children }) {
       return { success: false, reason: 'INVALID_PRODUCT' }
     }
 
-    const availableStock = Math.max(0, Number(product.stock ?? 999))
+    const selectedSize = typeof size === 'string' && size.trim() ? size.trim() : 'Free Size'
+    const availableStock = getProductAvailableStock(product, selectedSize)
     if (availableStock <= 0) {
       return { success: false, reason: 'OUT_OF_STOCK' }
     }
 
     const parsedQty = Math.max(1, Math.floor(Number(quantity) || 1))
-    const selectedSize = typeof size === 'string' && size.trim() ? size.trim() : 'Free Size'
-
     let result = { success: false, reason: 'UNKNOWN' }
 
     setCart((current) => {
@@ -516,6 +517,35 @@ export function CartProvider({ children }) {
     setCoupon(null)
   }
 
+  const restoreCartItems = useCallback((items) => {
+    if (!Array.isArray(items) || !items.length) return 0
+    setCart((current) => {
+      const next = [...current]
+      for (const item of items) {
+        const productId = String(item?.product_id || '')
+        const size = typeof item?.size === 'string' && item.size.trim() ? item.size.trim() : 'Free Size'
+        const stock = Math.max(0, Number(item?.stock) || 0)
+        if (!productId || stock <= 0) continue
+        const existingIndex = next.findIndex((entry) => !entry.is_combo && String(entry.product_id) === productId && entry.size === size)
+        if (existingIndex >= 0) {
+          const existing = next[existingIndex]
+          next[existingIndex] = { ...existing, price: Number(item.price) || 0, original_price: Number(item.original_price || item.price) || 0, stock, quantity: Math.min(stock, Math.max(1, Number(existing.quantity) || 1) + Math.max(1, Number(item.quantity) || 1)) }
+          continue
+        }
+        next.push({
+          cart_item_id: generateCartItemId(), product_id: productId,
+          product_name: String(item.product_name || 'Atelier Piece'), slug: String(item.slug || ''),
+          price: Math.max(0, Number(item.price) || 0), original_price: Math.max(0, Number(item.original_price || item.price) || 0),
+          image: typeof item.image === 'string' ? item.image : '', size,
+          colour: typeof item.colour === 'string' ? item.colour : '', stock,
+          quantity: Math.min(stock, Math.max(1, Number(item.quantity) || 1)),
+        })
+      }
+      return next
+    })
+    return items.length
+  }, [])
+
   // 10. Wishlist actions
   const toggleWish = (slug) => {
     const next = toggleWishlistStorage(slug)
@@ -577,8 +607,9 @@ export function CartProvider({ children }) {
           (p) => String(p.id) === String(item.product_id) || p.slug === item.slug
         )
 
-        if (liveProduct && (liveProduct.stock ?? 0) > 0) {
-          const currentStock = Math.max(1, Number(liveProduct.stock) || 1)
+        const availableStock = liveProduct ? getProductAvailableStock(liveProduct, item.size) : 0
+        if (liveProduct && liveProduct.active !== false && availableStock > 0) {
+          const currentStock = Math.max(1, availableStock)
           const currentPrice = Number(liveProduct.discount_price || liveProduct.price) || 0
           const clampedQty = Math.min(Math.max(1, item.quantity), currentStock)
 
@@ -719,6 +750,7 @@ export function CartProvider({ children }) {
         updateQty,
         removeFromCart,
         clearCart,
+        restoreCartItems,
         wishlist,
         wishCount: wishlist.length,
         toggleWish,

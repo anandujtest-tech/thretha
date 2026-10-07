@@ -35,6 +35,10 @@ import SizeGuideModal from './SizeGuideModal'
 import FlyingCartAnimation from './FlyingCartAnimation'
 import VirtualTryOnModal from './VirtualTryOnModal'
 import { useTryOnAvailability } from './TryOnSettingsContext'
+import ProductReviews from './ProductReviews'
+import RecentlyViewed from './RecentlyViewed'
+import BackInStockForm from './BackInStockForm'
+import { getProductAvailableStock, isProductVariantAvailable } from '@/lib/productInventory'
 
 export default function ProductDetail({ navigate, settings, slug, addToCart, initialProduct, categorySlug }) {
   const router = useRouter()
@@ -88,7 +92,7 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
 
       const explicitSizes = (product.sizes || []).filter((item) => item && item.size)
       const isMulti = explicitSizes.length > 1 || (explicitSizes.length === 1 && explicitSizes[0].size !== 'Free Size')
-      setSize(isMulti ? explicitSizes.find((item) => item.available)?.size || '' : explicitSizes[0]?.size || 'Free Size')
+      setSize(isMulti ? explicitSizes.find((item) => isProductVariantAvailable(product, item.size))?.size || '' : explicitSizes[0]?.size || 'Free Size')
     }
     const loadRelated = (product) => {
       if (!product.category_id) return
@@ -164,11 +168,9 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
   }
 
   const media = p.media || []
-  const availableStock = Math.max(0, Number(p.stock ?? 999))
-  const soldOut = availableStock <= 0
+  const productStock = Math.max(0, Number(p.stock ?? 999))
   const price = Number(p.discount_price || p.price) || 0
   const threshold = settings?.low_stock_threshold ?? 3
-  const low = !soldOut && availableStock <= threshold
   const hasDiscount = p.discount_price && p.discount_price < p.price
   const discountPercent = hasDiscount
     ? Math.round(((p.price - p.discount_price) / p.price) * 100)
@@ -179,6 +181,10 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
     explicitSizes.length > 1 ||
     (explicitSizes.length === 1 && explicitSizes[0].size !== 'Free Size')
   const selectedSize = (isMultiSize ? size : (size || 'Free Size'))?.trim() || ''
+  const availableStock = selectedSize ? getProductAvailableStock(p, selectedSize) : productStock
+  const soldOut = explicitSizes.length ? !explicitSizes.some((item) => isProductVariantAvailable(p, item.size)) : productStock <= 0
+  const selectedSizeOutOfStock = Boolean(selectedSize && !isProductVariantAvailable(p, selectedSize))
+  const low = !soldOut && availableStock <= threshold
 
   const cartItems = cartContext?.cart || []
   const existingCartItem = cartItems.find(
@@ -503,13 +509,13 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
 
               <div className="flex flex-wrap gap-2">
                 {p.sizes.map((s) => {
-                  const isAvailable = s.available && !soldOut && availableStock > 0
+                  const isAvailable = isProductVariantAvailable(p, s.size)
                   const isSelected = size === s.size
                   return (
                     <button
                       key={s.size}
                       type="button"
-                      disabled={!isAvailable || isAddingToCart}
+                      disabled={isAddingToCart}
                       onClick={() => {
                         setSize(s.size)
                         setSizeError(false)
@@ -539,6 +545,8 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
               )}
             </div>
           )}
+
+          {(soldOut || (selectedSize && selectedSizeOutOfStock)) && <BackInStockForm product={p} size={isMultiSize ? selectedSize : ''} />}
 
           {/* Quantity Stepper */}
           <div className="flex items-center gap-4 pt-2">
@@ -586,11 +594,11 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
             <Button
               ref={addToBagButtonRef}
               onClick={isInBag ? () => nav('/cart') : handleAddToCart}
-              disabled={!isInBag && (soldOut || availableStock <= 0 || isAddingToCart)}
+              disabled={!isInBag && (soldOut || selectedSizeOutOfStock || availableStock <= 0 || isAddingToCart)}
               aria-label={isInBag ? 'View Bag' : 'Add to Shopping Bag'}
               className={cn(
                 'w-full rounded-none py-6 text-xs uppercase tracking-[0.22em] transition-all duration-300 font-semibold shadow-md min-h-[50px] active:scale-[0.99]',
-                !isInBag && (soldOut || availableStock <= 0)
+                !isInBag && (soldOut || selectedSizeOutOfStock || availableStock <= 0)
                   ? 'bg-ink/40 text-cream cursor-not-allowed'
                   : addedToast
                   ? 'bg-emerald-800 text-cream'
@@ -732,6 +740,9 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
         </section>
       )}
 
+      <ProductReviews product={p} />
+      <RecentlyViewed product={p} settings={settings} />
+
       {/* Mobile Sticky Add to Bag Bar */}
       <div className="fixed bottom-16 left-0 right-0 z-30 sm:hidden bg-cream/95 backdrop-blur-md border-t border-ink/10 px-4 py-2.5 flex items-center justify-between gap-3 shadow-lg">
         <div>
@@ -740,7 +751,7 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
         </div>
         <button
           type="button"
-          disabled={!isInBag && (soldOut || availableStock <= 0 || isAddingToCart)}
+              disabled={!isInBag && (soldOut || selectedSizeOutOfStock || availableStock <= 0 || isAddingToCart)}
           onClick={isInBag ? () => nav('/cart') : handleAddToCart}
           aria-label={isInBag ? 'View Bag' : 'Add to Shopping Bag'}
           className={cn(
@@ -754,7 +765,7 @@ export default function ProductDetail({ navigate, settings, slug, addToCart, ini
         >
           {isInBag
             ? 'View Bag →'
-            : soldOut || availableStock <= 0
+            : soldOut || selectedSizeOutOfStock || availableStock <= 0
             ? 'Sold Out'
             : isAddingToCart
             ? 'Adding…'
