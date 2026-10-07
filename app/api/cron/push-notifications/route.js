@@ -3,6 +3,7 @@ import { ensurePushIndexes, processPushQueue } from '@/lib/pushScheduler'
 import { getAppBaseUrl } from '@/lib/auth'
 import { ensureBackInStockIndexes, processBackInStockSubscriptions } from '@/lib/backInStock'
 import { ensureAbandonedCartIndexes, processAbandonedCartReminders } from '@/lib/abandonedCart'
+import { processNewsletterQueue } from '@/lib/newsletterScheduler'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -31,7 +32,7 @@ export async function GET(request) {
   }
   try {
     const database = await getDatabase()
-    const [push, backInStock, abandonedCart] = await Promise.all([
+    const [push, backInStock, abandonedCart, newsletter] = await Promise.all([
       processPushQueue(database),
       processBackInStockSubscriptions(database, {
         appUrl: getAppBaseUrl(request),
@@ -41,8 +42,15 @@ export async function GET(request) {
         appUrl: getAppBaseUrl(request),
         secret: process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret',
       }),
+      processNewsletterQueue(database, {
+        appUrl: getAppBaseUrl(request),
+        secret: process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret',
+      }).catch(() => {
+        console.error('[Newsletter Cron] Batch processing failed; it can resume on the next invocation.')
+        return { status: 'error', processed: 0 }
+      }),
     ])
-    return Response.json({ ...push, backInStock, abandonedCart })
+    return Response.json({ ...push, backInStock, abandonedCart, newsletter })
   } catch (error) {
     console.error('[Push Cron] Queue processing failed:', error?.message || 'unknown error')
     return Response.json({ error: 'Push queue processing failed' }, { status: 500 })

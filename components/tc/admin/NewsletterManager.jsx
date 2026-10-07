@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Download, Search } from 'lucide-react'
 import { api, auth } from '@/lib/tc'
+import NewsletterCampaignManager from './NewsletterCampaignManager'
 
 export default function NewsletterManager() {
   const [data, setData] = useState(null)
@@ -48,7 +49,7 @@ export default function NewsletterManager() {
     finally { setBusyExport(false) }
   }
 
-  return <section className="space-y-5">
+  return <div className="space-y-10"><NewsletterCampaignManager /><section className="space-y-5">
     <div className="flex flex-wrap items-end justify-between gap-4 border-b border-ink/10 pb-4">
       <div><p className="text-[10px] uppercase tracking-[0.25em] text-gold-dark">Audience</p><h1 className="mt-1 font-display text-3xl text-ink">Newsletter Subscribers</h1></div>
       <button type="button" disabled={busyExport} onClick={exportActive} className="inline-flex min-h-10 items-center gap-2 border border-ink/20 px-3 text-[10px] font-bold uppercase tracking-wider text-ink disabled:opacity-50"><Download size={14} />{busyExport ? 'Preparing…' : 'Export active'}</button>
@@ -64,5 +65,5 @@ export default function NewsletterManager() {
       {data.subscribers.map((subscriber) => <article key={subscriber.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div className="min-w-0"><p className="break-all text-sm font-semibold text-ink">{subscriber.email_normalized}</p><p className="mt-1 text-[10px] text-cocoa-light">Subscribed {subscriber.consented_at ? new Date(subscriber.consented_at).toLocaleString() : 'date unavailable'}{subscriber.unsubscribed_at ? ` · Unsubscribed ${new Date(subscriber.unsubscribed_at).toLocaleString()}` : ''}</p></div><div className="flex items-center gap-3"><span className={`text-[9px] font-bold uppercase tracking-wider ${subscriber.status === 'active' ? 'text-emerald-800' : 'text-cocoa'}`}>{subscriber.status}</span>{subscriber.status === 'active' && <button type="button" disabled={busyId === subscriber.id} onClick={() => unsubscribe(subscriber)} className="border border-ink/20 px-3 py-2 text-[9px] font-bold uppercase tracking-wider text-cocoa disabled:opacity-50">{busyId === subscriber.id ? 'Updating…' : 'Unsubscribe'}</button>}</div></article>)}
     </div>}
     {data?.pages > 1 && <div className="flex items-center justify-between text-xs"><span className="text-cocoa">Page {data.page} of {data.pages} · {data.total} records</span><div className="flex gap-2"><button disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="border border-ink/20 px-3 py-2 disabled:opacity-40">Previous</button><button disabled={page >= data.pages} onClick={() => setPage((value) => Math.min(data.pages, value + 1))} className="border border-ink/20 px-3 py-2 disabled:opacity-40">Next</button></div></div>}
-  </section>
+  </section></div>
 }

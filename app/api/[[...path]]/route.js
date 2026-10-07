@@ -111,6 +111,8 @@ import { ensureProductReviewIndexes, normalizeReviewText, isCloudinaryImageUrl }
 import { ensureBackInStockIndexes, isVariantAvailable, saveBackInStockSubscription, unsubscribeBackInStockSubscription, verifyBackInStockUnsubscribeToken, verifySignedBackInStockUnsubscribeToken } from '../../../lib/backInStock.js'
 import { ensureAbandonedCartIndexes, createCartKey, getCartRecoveryItems, createCartRecoveryToken, verifyCartRecoveryToken, backInStockUnsubscribeToken as createCartUnsubscribeToken, verifyBackInStockUnsubscribeToken as verifyCartUnsubscribeToken } from '../../../lib/abandonedCart.js'
 import { ensureNewsletterIndexes, createNewsletterUnsubscribeToken, verifyNewsletterUnsubscribeToken, normalizeNewsletterEmail, isValidNewsletterEmail } from '../../../lib/newsletter.js'
+import { validateNewsletterDraft, renderNewsletterEmail } from '../../../lib/newsletterCampaigns.js'
+import { countNewsletterAudience, ensureNewsletterCampaignIndexes } from '../../../lib/newsletterScheduler.js'
 import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
 import { getProductEffectivePrice } from '../../../lib/productInventory.js'
 import { isValidHomeSectionOrderInput, isValidHomeSectionVisibilityInput, normalizeHomeSectionOrder, normalizeHomeSectionVisibility } from '../../../lib/homeLayout.js'
@@ -309,6 +311,26 @@ function publicOrderReceipt(order) {
     },
     payment_id: order.payment_id || null,
     cancellation_reason: order.cancellation_reason || null,
+  }
+}
+
+function adminNewsletterCampaign(campaign) {
+  return {
+    id: campaign.id,
+    subject: campaign.subject,
+    preview_text: campaign.preview_text || '',
+    blocks: campaign.blocks || [],
+    audience: campaign.audience || 'active',
+    status: campaign.status,
+    recipient_count: campaign.recipient_count || 0,
+    sent_count: campaign.sent_count || 0,
+    failed_count: campaign.failed_count || 0,
+    unknown_count: campaign.unknown_count || 0,
+    skipped_count: campaign.skipped_count || 0,
+    created_at: campaign.created_at,
+    updated_at: campaign.updated_at,
+    started_at: campaign.started_at || null,
+    completed_at: campaign.completed_at || null,
   }
 }
 
@@ -3628,6 +3650,97 @@ async function handleRoute(request, { params }) {
         const existing = result.matchedCount ? null : await database.collection('newsletter_subscribers').findOne({ id: parts[2] }, { projection: { status: 1 } })
         if (!result.matchedCount && !existing) return json({ error: 'Subscriber not found.' }, 404)
         return json({ ok: true, status: 'unsubscribed' })
+      }
+
+      // Newsletter campaigns use the existing Admin token and the protected cron worker.
+      if (route === '/admin/newsletter-campaigns/audience' && method === 'GET') {
+        return json({ audience: 'active', recipient_count: await countNewsletterAudience(database) })
+      }
+      if (route === '/admin/newsletter-campaigns/preview' && method === 'POST') {
+        const body = await request.json().catch(() => null)
+        const baseUrl = getAppBaseUrl(request)
+        const validated = validateNewsletterDraft(body, baseUrl)
+        if (validated.error) return json({ error: validated.error }, 400)
+        const html = renderNewsletterEmail(validated.value, {
+          baseUrl,
+          unsubscribeUrl: `${baseUrl}/newsletter/unsubscribe?token=preview`,
+        })
+        return json({ html })
+      }
+      if (route === '/admin/newsletter-campaigns' && method === 'GET') {
+        const campaigns = await database.collection('newsletter_campaigns').find({}, {
+          projection: { _id: 0, id: 1, subject: 1, status: 1, recipient_count: 1, sent_count: 1, failed_count: 1, unknown_count: 1, skipped_count: 1, created_at: 1, completed_at: 1 },
+        }).sort({ created_at: -1 }).limit(50).toArray()
+        return json({ campaigns })
+      }
+      if (route === '/admin/newsletter-campaigns' && method === 'POST') {
+        const body = await request.json().catch(() => null)
+        const validated = validateNewsletterDraft(body, getAppBaseUrl(request))
+        if (validated.error) return json({ error: validated.error }, 400)
+        await ensureNewsletterCampaignIndexes(database)
+        const now = new Date()
+        const campaign = {
+          id: uuidv4(), ...validated.value, status: 'DRAFT', recipient_count: 0, sent_count: 0,
+          failed_count: 0, unknown_count: 0, skipped_count: 0, retry_generation: 0,
+          created_at: now, updated_at: now, created_by: String(auth.id || auth.email || 'admin').slice(0, 160),
+        }
+        await database.collection('newsletter_campaigns').insertOne(campaign)
+        return json({ campaign: adminNewsletterCampaign(campaign) }, 201)
+      }
+      if (parts[0] === 'admin' && parts[1] === 'newsletter-campaigns' && parts.length >= 3) {
+        const campaignId = String(parts[2] || '')
+        if (!/^[0-9a-f-]{36}$/i.test(campaignId)) return json({ error: 'Campaign not found.' }, 404)
+        const campaigns = database.collection('newsletter_campaigns')
+        if (parts.length === 3 && method === 'GET') {
+          const campaign = await campaigns.findOne({ id: campaignId })
+          if (!campaign) return json({ error: 'Campaign not found.' }, 404)
+          const failures = await database.collection('newsletter_deliveries').find({ campaign_id: campaignId, status: { $in: ['FAILED', 'UNKNOWN'] } }, {
+            projection: { _id: 0, status: 1, failure_reason: 1, completed_at: 1 },
+          }).sort({ completed_at: -1 }).limit(20).toArray()
+          return json({ campaign: adminNewsletterCampaign(campaign), failures })
+        }
+        if (parts.length === 3 && method === 'PATCH') {
+          const body = await request.json().catch(() => null)
+          const validated = validateNewsletterDraft(body, getAppBaseUrl(request))
+          if (validated.error) return json({ error: validated.error }, 400)
+          const changed = await campaigns.updateOne({ id: campaignId, status: 'DRAFT' }, { $set: { ...validated.value, updated_at: new Date() } })
+          if (!changed.matchedCount) return json({ error: 'Only existing drafts can be edited.' }, 409)
+          const campaign = await campaigns.findOne({ id: campaignId })
+          return json({ campaign: adminNewsletterCampaign(campaign) })
+        }
+        if (parts.length === 4 && method === 'POST') {
+          const body = await request.json().catch(() => ({}))
+          if (!body || Array.isArray(body) || Object.keys(body).length) return json({ error: 'Unsupported campaign action data.' }, 400)
+          const action = parts[3]
+          const campaign = await campaigns.findOne({ id: campaignId })
+          if (!campaign) return json({ error: 'Campaign not found.' }, 404)
+          if (action === 'send') {
+            if (campaign.status !== 'DRAFT') return json({ error: 'Only drafts can be queued.' }, 409)
+            if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) return json({ error: 'Newsletter email is not configured.' }, 503)
+            const queuedAt = new Date()
+            const recipientCount = await countNewsletterAudience(database, queuedAt)
+            if (!recipientCount) return json({ error: 'No active subscribers available.' }, 409)
+            const changed = await campaigns.updateOne({ id: campaignId, status: 'DRAFT' }, {
+              $set: { status: 'QUEUED', queued_at: queuedAt, recipient_count: recipientCount, cursor_email: '', retry_only: false, updated_at: queuedAt },
+            })
+            if (!changed.matchedCount) return json({ error: 'Campaign has already been queued.' }, 409)
+          } else if (action === 'retry-failed') {
+            if (!['PARTIAL', 'FAILED'].includes(campaign.status) || !(campaign.failed_count > 0)) return json({ error: 'There are no failed deliveries to retry.' }, 409)
+            const changed = await campaigns.updateOne({ id: campaignId, status: campaign.status }, {
+              $set: { status: 'QUEUED', retry_only: true, updated_at: new Date() },
+              $inc: { retry_generation: 1 },
+              $unset: { completed_at: '' },
+            })
+            if (!changed.matchedCount) return json({ error: 'Campaign status changed. Refresh and retry.' }, 409)
+          } else if (action === 'cancel') {
+            const changed = await campaigns.updateOne({ id: campaignId, status: { $in: ['QUEUED', 'SENDING'] } }, {
+              $set: { status: 'CANCELLED', completed_at: new Date(), updated_at: new Date() },
+              $unset: { claim_token: '', claim_expires_at: '' },
+            })
+            if (!changed.matchedCount) return json({ error: 'Only queued or sending campaigns can be cancelled.' }, 409)
+          } else return json({ error: 'Unsupported campaign action.' }, 400)
+          return json({ campaign: adminNewsletterCampaign(await campaigns.findOne({ id: campaignId })) })
+        }
       }
 
       if (route === '/admin/reviews' && method === 'GET') {
