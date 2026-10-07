@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StoreLayout from '@/components/tc/StoreLayout'
@@ -28,22 +28,43 @@ export default function OrderConfirmationPage() {
   const id = params?.id
   const { user, isAuthenticated } = useAuth()
   const { clearCart } = useCart()
+  const clearCartRef = useRef(clearCart)
+  useEffect(() => { clearCartRef.current = clearCart }, [clearCart])
 
   const [order, setOrder] = useState(null)
   const [settings, setSettings] = useState(null)
   const [err, setErr] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [verificationRequired, setVerificationRequired] = useState(false)
+  const [contact, setContact] = useState('')
+  const [verificationBusy, setVerificationBusy] = useState(false)
+  const [verificationError, setVerificationError] = useState('')
 
   useEffect(() => {
     if (!id) return
+    let active = true
+    setLoading(true)
+    setErr(false)
+    setOrder(null)
+    setVerificationRequired(false)
+    setVerificationError('')
+    setContact('')
     Promise.all([
-      api(`/orders/${id}`).catch(() => null),
+      api(`/orders/${encodeURIComponent(id)}`).catch(() => null),
       api('/settings').catch(() => null),
     ]).then(([o, s]) => {
+      if (!active) return
       if (o) {
+        if (o.requires_contact_verification) {
+          setVerificationRequired(true)
+          setOrder(null)
+          if (s) setSettings(s)
+          setLoading(false)
+          return
+        }
         setOrder(o)
         if (o.payment_status === 'PAID' || o.status === 'CONFIRMED' || o.payment_method === 'WHATSAPP_CONCIERGE') {
-          clearCart()
+          clearCartRef.current()
         }
       } else {
         setErr(true)
@@ -51,7 +72,27 @@ export default function OrderConfirmationPage() {
       if (s) setSettings(s)
       setLoading(false)
     })
-  }, [id, clearCart])
+    return () => { active = false }
+  }, [id])
+
+  const verifyGuestOrder = async (event) => {
+    event.preventDefault()
+    setVerificationBusy(true)
+    setErr(false)
+    setVerificationError('')
+    try {
+      const result = await api(`/orders/${encodeURIComponent(id)}/verify`, { method: 'POST', body: { contact } })
+      setOrder(result.order)
+      setVerificationRequired(false)
+      if (result.order.payment_status === 'PAID' || result.order.status === 'CONFIRMED' || result.order.payment_method === 'WHATSAPP_CONCIERGE') clearCart()
+    } catch (error) {
+      setErr(true)
+      setVerificationError(error.status === 429
+        ? 'Too many attempts. Please wait a few minutes before trying again.'
+        : 'We could not verify those details. Check them and try again.')
+    }
+    finally { setVerificationBusy(false) }
+  }
 
   if (loading) {
     return (
@@ -67,6 +108,19 @@ export default function OrderConfirmationPage() {
   }
 
   if (err || !order) {
+    if (verificationRequired) return (
+      <StoreLayout>
+        <div className="container py-24 max-w-md mx-auto">
+          <form onSubmit={verifyGuestOrder} className="space-y-4 border border-ink/10 bg-cream p-6">
+            <h1 className="font-display text-3xl text-ink">Verify Your Order</h1>
+            <p className="text-xs leading-relaxed text-cocoa">For your privacy, confirm the phone number or email used at checkout to view this receipt.</p>
+            <label className="block text-[10px] font-semibold uppercase tracking-wider">Phone or email<input required autoComplete="on" value={contact} onChange={(event) => setContact(event.target.value)} className="mt-1 min-h-11 w-full border border-ink/20 bg-paper px-3 text-sm normal-case tracking-normal" /></label>
+            {err && <p role="alert" className="text-xs text-coral">{verificationError}</p>}
+            <Button disabled={verificationBusy} type="submit" className="w-full rounded-none bg-ink text-xs uppercase tracking-widest text-cream">{verificationBusy ? 'Verifying…' : 'View Order'}</Button>
+          </form>
+        </div>
+      </StoreLayout>
+    )
     return (
       <StoreLayout>
         <div className="container py-24 text-center max-w-md mx-auto space-y-4">
@@ -99,7 +153,7 @@ export default function OrderConfirmationPage() {
 
   const isCancelled = order.status === 'CANCELLED' || order.payment_status === 'CANCELLED'
   const refundStatus = (order.refund?.status || order.payment?.refund_status || order.refund_status || '').toUpperCase()
-  const refundAmount = order.refund?.amount || order.payment?.refund_amount || order.total
+  const refundAmount = order.refund?.amount ?? order.payment?.refund_amount ?? order.refund_amount ?? order.total
 
   return (
     <StoreLayout>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StoreLayout from '@/components/tc/StoreLayout'
@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { INDIAN_STATES, validateAddress } from '@/lib/addressValidation'
 import ErrorBoundary from '@/components/tc/ErrorBoundary'
+import { trackVisitorEvent } from '@/lib/visitorAnalytics'
 
 function WAIcon({ className = 'h-4 w-4' }) {
   return (
@@ -117,6 +118,17 @@ function CheckoutInner() {
     clearCart,
     revalidateCart,
   } = useCart()
+  const checkoutEventsSent = useRef(new Set())
+
+  useEffect(() => {
+    if (!isLoaded || !cart?.length) return
+    const slugs = new Set(cart.map((item) => item.slug).filter(Boolean))
+    for (const product_slug of slugs) {
+      if (checkoutEventsSent.current.has(product_slug)) continue
+      checkoutEventsSent.current.add(product_slug)
+      trackVisitorEvent('checkout_started', { product_slug })
+    }
+  }, [isLoaded, cart])
 
   const [googleLoading, setGoogleLoading] = useState(false)
   const handleGoogleSignIn = async (e) => {

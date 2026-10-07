@@ -222,6 +222,96 @@ function strip(doc) {
   return rest
 }
 
+function normalizeIndianMobile(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw || !/^[+\d\s().-]+$/.test(raw) || (raw.includes('+') && (!raw.startsWith('+') || raw.indexOf('+', 1) !== -1))) return null
+  const digits = raw.replace(/\D/g, '')
+  if (raw.startsWith('+') && !/^91[6-9]\d{9}$/.test(digits)) return null
+  const local = digits.length === 10 ? digits
+    : digits.length === 11 && digits.startsWith('0') ? digits.slice(1)
+    : digits.length === 12 && digits.startsWith('91') ? digits.slice(2)
+    : null
+  return local && /^[6-9]\d{9}$/.test(local) ? local : null
+}
+
+function guestContactMatches(order, contact) {
+  const suppliedEmail = String(contact ?? '').trim().toLowerCase()
+  const orderEmail = String(order.customer?.email ?? '').trim().toLowerCase()
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(suppliedEmail) && suppliedEmail === orderEmail) return true
+  const suppliedPhone = normalizeIndianMobile(contact)
+  return Boolean(suppliedPhone && [order.customer?.phone, order.customer?.whatsapp]
+    .some((phone) => normalizeIndianMobile(phone) === suppliedPhone))
+}
+
+function orderReferenceFilter(reference) {
+  const normalized = String(reference).trim()
+  return { $or: [
+    { id: normalized },
+    { order_number: normalized },
+    { order_number: normalized.toUpperCase() },
+    { cashfree_order_id: normalized },
+    { 'payment.cashfree_order_id': normalized },
+  ] }
+}
+
+function publicOrderReceipt(order) {
+  return {
+    id: order.id,
+    order_number: order.order_number,
+    status: order.status || 'NEW',
+    payment_status: order.payment_status || 'PENDING',
+    payment_method: order.payment_method || 'WHATSAPP_CONCIERGE',
+    created_at: order.created_at,
+    updated_at: order.updated_at,
+    customer: {
+      name: order.customer?.fullName || order.customer?.name || '',
+      house: order.customer?.addressLine1 || order.customer?.house || '',
+      street: order.customer?.addressLine2 || order.customer?.street || '',
+      city: order.customer?.city || '',
+      district: order.customer?.district || '',
+      state: order.customer?.state || '',
+      pincode: order.customer?.postalCode || order.customer?.pincode || '',
+      whatsapp: order.customer?.whatsapp || '',
+      phone: order.customer?.phone || '',
+      email: order.customer?.email || '',
+    },
+    items: (order.items || []).map((item) => ({
+      product_id: item.product_id || null,
+      product_name: item.product_name || item.combo_name || '',
+      sku: item.sku || null,
+      size: item.size || null,
+      colour: item.colour || null,
+      quantity: item.quantity,
+      price: item.price,
+      is_combo: item.is_combo === true,
+      combo_name: item.combo_name || null,
+      customer_title: item.customer_title || null,
+      savings: item.savings || 0,
+      components: item.is_combo && Array.isArray(item.components)
+        ? item.components.map((component) => ({ product_name: component.product_name, size: component.size || null, quantity: component.quantity }))
+        : [],
+    })),
+    subtotal: order.subtotal ?? order.total,
+    discount: order.discount || 0,
+    shipping: order.shipping || 0,
+    total: order.total,
+    courier: order.courier || null,
+    tracking_number: order.tracking_number || null,
+    estimated_delivery: order.estimated_delivery || null,
+    refund_status: order.refund?.status || order.payment?.refund_status || order.refund_status || null,
+    refund_amount: order.refund?.amount ?? order.payment?.refund_amount ?? order.refund_amount ?? null,
+    refund: { status: order.refund?.status || null, amount: order.refund?.amount ?? null },
+    payment: {
+      cashfree_payment_id: order.payment?.cashfree_payment_id || null,
+      failure_reason: order.payment?.failure_reason || null,
+      refund_status: order.payment?.refund_status || null,
+      refund_amount: order.payment?.refund_amount ?? null,
+    },
+    payment_id: order.payment_id || null,
+    cancellation_reason: order.cancellation_reason || null,
+  }
+}
+
 function reviewOrderOwnerFilter(customer) {
   const owners = [{ userId: customer.id }]
   const email = String(customer.email || '').trim()
@@ -1837,34 +1927,23 @@ async function handleRoute(request, { params }) {
     }
 
     // ===== ORDER TRACKING =====
-    if (route === '/orders/track' && method === 'GET') {
-      const url = new URL(request.url)
-      const orderNumber = (url.searchParams.get('order_number') || '').trim()
-      const contact = (url.searchParams.get('contact') || '').trim().toLowerCase()
+    if (route === '/orders/track' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const orderNumber = String(body.order_number || '').trim()
+      const contact = String(body.contact || '').trim()
 
-      if (!orderNumber) {
+      if (!orderNumber || orderNumber.length > 100) {
         return json({ error: 'Order reference number is required' }, 400)
       }
 
+      if (!contact || contact.length > 254) return json({ error: 'Enter the phone number or email used during order placement.' }, 400)
+      const ipKey = crypto.createHash('sha256').update(getClientIp(request)).digest('hex')
+      const rate = await checkRateLimit(database, `guest_order_track:${ipKey}`, 8, 15)
+      if (!rate.allowed) return json({ error: 'Too many tracking attempts. Please try again later.' }, 429)
       const order = await database.collection('orders').findOne({
-        order_number: { $regex: new RegExp(`^${orderNumber}$`, 'i') },
+        $or: [{ order_number: orderNumber }, { order_number: orderNumber.toUpperCase() }],
       })
-
-      if (!order) {
-        return json({ error: 'No order found with the provided reference number.' }, 404)
-      }
-
-      // If contact provided, verify
-      if (contact) {
-        const custPhone = (order.customer?.whatsapp || order.customer?.phone || '').replace(/[^0-9]/g, '')
-        const custEmail = (order.customer?.email || '').toLowerCase()
-        const matchPhone = custPhone && custPhone.includes(contact.replace(/[^0-9]/g, ''))
-        const matchEmail = custEmail && custEmail.includes(contact)
-
-        if (!matchPhone && !matchEmail) {
-          return json({ error: 'Verification failed. Please enter the phone number or email used during order placement.' }, 403)
-        }
-      }
+      if (!order || !guestContactMatches(order, contact)) return json({ error: 'The order reference and contact details could not be verified.' }, 403)
 
       return json({
         order_number: order.order_number,
@@ -1873,7 +1952,7 @@ async function handleRoute(request, { params }) {
         payment_method: order.payment_method || 'WHATSAPP_CONCIERGE',
         created_at: order.created_at,
         updated_at: order.updated_at,
-        items: order.items || [],
+        items: (order.items || []).map((item) => ({ product_name: item.product_name, sku: item.sku || null, size: item.size || null, colour: item.colour || null, quantity: item.quantity, price: item.price })),
         subtotal: order.subtotal || order.total,
         discount: order.discount || 0,
         shipping: order.shipping || 0,
@@ -1887,20 +1966,29 @@ async function handleRoute(request, { params }) {
       })
     }
 
+    // ===== GUEST ORDER CONTACT VERIFICATION =====
+    if (parts[0] === 'orders' && parts.length === 3 && parts[2] === 'verify' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const ref = String(parts[1] || '').trim()
+      const contact = String(body.contact || '').trim()
+      if (!ref || ref.length > 100 || !contact || contact.length > 254) return json({ error: 'A valid order reference and contact are required.' }, 400)
+      const ipKey = crypto.createHash('sha256').update(getClientIp(request)).digest('hex')
+      const rate = await checkRateLimit(database, `guest_order_verify:${ipKey}`, 8, 15)
+      if (!rate.allowed) return json({ error: 'Too many verification attempts. Please try again later.' }, 429)
+      const order = await database.collection('orders').findOne(orderReferenceFilter(ref))
+      if (!order || !guestContactMatches(order, contact)) return json({ error: 'The order reference and contact details could not be verified.' }, 403)
+      return json({ order: publicOrderReceipt(order) })
+    }
+
     // ===== GET SINGLE ORDER (confirmation/receipt) =====
     if (parts[0] === 'orders' && parts.length === 2 && method === 'GET') {
       const ref = parts[1]
-      const order = await database.collection('orders').findOne({
-        $or: [
-          { id: ref },
-          { order_number: ref },
-          { order_number: { $regex: new RegExp(`^${ref}$`, 'i') } },
-          { cashfree_order_id: ref },
-          { 'payment.cashfree_order_id': ref },
-        ],
-      })
-      if (!order) return json({ error: 'Order not found' }, 404)
-      return json(strip(order))
+      const customer = await getCustomerFromRequest(request, database)
+      if (!customer) return json({ requires_contact_verification: true })
+      if (!ref || ref.length > 100) return json({ error: 'Order not found' }, 404)
+      const order = await database.collection('orders').findOne(orderReferenceFilter(ref))
+      if (!order || order.userId !== customer.id) return json({ error: 'Order not found' }, 404)
+      return json(publicOrderReceipt(order))
     }
 
     // ===== CASHFREE PAYMENT INTEGRATION =====

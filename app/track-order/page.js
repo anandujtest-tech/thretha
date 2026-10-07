@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import StoreLayout from '@/components/tc/StoreLayout'
 import { api, inr } from '@/lib/tc'
@@ -53,30 +53,25 @@ function TrackOrderInner() {
   const [loading, setLoading] = useState(false)
   const [order, setOrder] = useState(null)
   const [error, setError] = useState('')
+  const requestSequence = useRef(0)
 
   const fetchTracking = async (refNum, contactVal) => {
-    if (!refNum.trim()) return
+    if (!refNum.trim() || !contactVal.trim()) return
+    const requestId = ++requestSequence.current
     setLoading(true)
     setError('')
+    setOrder(null)
     try {
-      const url = `/orders/track?order_number=${encodeURIComponent(refNum.trim())}${
-        contactVal ? `&contact=${encodeURIComponent(contactVal.trim())}` : ''
-      }`
-      const data = await api(url)
-      setOrder(data)
+      const data = await api('/orders/track', { method: 'POST', body: { order_number: refNum.trim(), contact: contactVal.trim() } })
+      if (requestId === requestSequence.current) setOrder(data)
     } catch (err) {
-      setError(err.message || 'No order found with the provided details.')
-      setOrder(null)
+      if (requestId === requestSequence.current) setError(err.message || 'We could not verify those details.')
     } finally {
-      setLoading(false)
+      if (requestId === requestSequence.current) setLoading(false)
     }
   }
 
-  useEffect(() => {
-    if (initialRef) {
-      fetchTracking(initialRef, '')
-    }
-  }, [initialRef])
+  useEffect(() => { if (initialRef) setOrderNumber(initialRef) }, [initialRef])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -118,19 +113,20 @@ function TrackOrderInner() {
 
           <div>
             <Label className="text-[11px] uppercase tracking-wider font-semibold text-ink">
-              Phone or Email (Optional)
+              Phone or Email *
             </Label>
             <Input
               value={contact}
               onChange={(e) => setContact(e.target.value)}
               placeholder="e.g. 9876543210 or email"
+              required
               className="mt-1 rounded-none border-ink/20 bg-paper text-xs focus-visible:border-mango"
             />
           </div>
 
           <Button
             type="submit"
-            disabled={loading || !orderNumber.trim()}
+            disabled={loading || !orderNumber.trim() || !contact.trim()}
             className="rounded-none bg-ink text-cream text-xs uppercase tracking-widest px-6 py-5 shadow-sm hover:bg-cocoa-dark font-semibold shrink-0"
           >
             {loading ? (
@@ -291,4 +287,3 @@ export default function TrackOrderPage() {
     </StoreLayout>
   )
 }
-
