@@ -113,7 +113,7 @@ import { ensureAbandonedCartIndexes, createCartKey, getCartRecoveryItems, create
 import { ensureNewsletterIndexes, createNewsletterUnsubscribeToken, verifyNewsletterUnsubscribeToken, normalizeNewsletterEmail, isValidNewsletterEmail } from '../../../lib/newsletter.js'
 import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
 import { getProductEffectivePrice } from '../../../lib/productInventory.js'
-import { isValidHomeSectionOrderInput, normalizeHomeSectionOrder } from '../../../lib/homeLayout.js'
+import { isValidHomeSectionOrderInput, isValidHomeSectionVisibilityInput, normalizeHomeSectionOrder, normalizeHomeSectionVisibility } from '../../../lib/homeLayout.js'
 import { DEFAULT_HOMEPAGE_CONTENT } from '../../../lib/homepageContent.js'
 import { ANALYTICS_DEDUPE_WINDOWS, allowAnalyticsRequest, createAnalyticsDedupeKey, reserveAnalyticsDedupe, validateAnalyticsEntity, validateAnalyticsPayload } from '../../../lib/analyticsProtection.js'
 
@@ -3957,18 +3957,28 @@ async function handleRoute(request, { params }) {
 
       // ---- Homepage section order (update only this setting; never overwrite other settings) ----
       if (route === '/admin/home-layout' && method === 'GET') {
-        const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { 'homepage_content.section_order': 1 } })
-        return json({ section_order: normalizeHomeSectionOrder(settings?.homepage_content?.section_order) })
+        const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { 'homepage_content.section_order': 1, 'homepage_content.section_visibility': 1 } })
+        return json({
+          section_order: normalizeHomeSectionOrder(settings?.homepage_content?.section_order),
+          section_visibility: normalizeHomeSectionVisibility(settings?.homepage_content?.section_visibility),
+        })
       }
       if (route === '/admin/home-layout' && method === 'PUT') {
         const body = await request.json().catch(() => null)
         if (!isValidHomeSectionOrderInput(body?.section_order)) {
           return json({ error: 'Homepage section order must be a list of section IDs.' }, 400)
         }
+        if (body.section_visibility !== undefined && !isValidHomeSectionVisibilityInput(body.section_visibility)) {
+          return json({ error: 'Homepage section visibility must contain boolean values.' }, 400)
+        }
         const sectionOrder = normalizeHomeSectionOrder(body.section_order)
-        await database.collection('settings').updateOne({ id: 'global' }, { $set: { 'homepage_content.section_order': sectionOrder, updated_at: new Date() } }, { upsert: true })
+        const existing = body.section_visibility === undefined
+          ? await database.collection('settings').findOne({ id: 'global' }, { projection: { 'homepage_content.section_visibility': 1 } })
+          : null
+        const sectionVisibility = normalizeHomeSectionVisibility(body.section_visibility ?? existing?.homepage_content?.section_visibility)
+        await database.collection('settings').updateOne({ id: 'global' }, { $set: { 'homepage_content.section_order': sectionOrder, 'homepage_content.section_visibility': sectionVisibility, updated_at: new Date() } }, { upsert: true })
         revalidatePath('/', 'page')
-        return json({ section_order: sectionOrder })
+        return json({ section_order: sectionOrder, section_visibility: sectionVisibility })
       }
 
       // ---- Admin settings ----

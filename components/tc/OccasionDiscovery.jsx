@@ -15,7 +15,7 @@ export default function OccasionDiscovery({ settings, products = [], categories 
         <h2 id="shop-occasion-heading">Shop by Occasion</h2>
         <span className="fashion-eyebrow">A look for every moment</span>
       </div>
-      <div className="flex w-full min-w-0 gap-5 overflow-x-auto overscroll-x-contain pb-3 sm:gap-7 lg:justify-between" aria-label="Shop by occasion">
+      <div className="hide-scrollbar flex w-full min-w-0 gap-5 overflow-x-auto overscroll-x-contain pb-3 sm:gap-7 lg:justify-between" aria-label="Shop by occasion">
         {occasions.map((occasion, index) => {
           const matchingProduct = products.find((product) => product.occasion_slugs?.includes(occasion.slug) && productImage(product))
           const categoryImage = categories.find((category) => category.slug === occasion.slug)?.image

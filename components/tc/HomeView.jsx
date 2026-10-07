@@ -15,7 +15,7 @@ import { getHomepageContent } from '@/lib/homepageContent'
 import OccasionDiscovery from './OccasionDiscovery'
 import Newsletter from './Newsletter'
 import HomeDiscoveryFilters from './HomeDiscoveryFilters'
-import { normalizeHomeSectionOrder } from '@/lib/homeLayout'
+import { getVisibleHomeSectionIds } from '@/lib/homeLayout'
 
 export default function HomeView({ addToCart, initialData }) {
   const router = useRouter()
@@ -67,7 +67,7 @@ export default function HomeView({ addToCart, initialData }) {
   const content = getHomepageContent(data.settings)
   const imagery = [...data.featured, ...data.arrivals]
   const edit = data.featured.find((product) => productImage(product))
-  const sectionOrder = normalizeHomeSectionOrder(data.settings?.homepage_content?.section_order)
+  const sectionOrder = getVisibleHomeSectionIds(data.settings?.homepage_content?.section_order, data.settings?.homepage_content?.section_visibility)
   const sections = {
     hero: <ErrorBoundary sectionName="Hero"><FullscreenHero settings={data.settings} /></ErrorBoundary>,
     intro: <div className="fashion-intro"><span>{content.intro_left}</span><span>{content.intro_right}</span></div>,
