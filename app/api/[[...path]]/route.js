@@ -116,6 +116,7 @@ import { activeNewsletterAudienceFilter, validateNewsletterDraft, renderNewslett
 import { countNewsletterAudience, ensureNewsletterCampaignIndexes } from '../../../lib/newsletterScheduler.js'
 import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
 import { getProductEffectivePrice } from '../../../lib/productInventory.js'
+import { guestContactMatches, verifyCashfreePayment } from '../../../lib/cashfreeVerification.js'
 import { isValidHomeSectionOrderInput, isValidHomeSectionVisibilityInput, normalizeHomeSectionOrder, normalizeHomeSectionVisibility } from '../../../lib/homeLayout.js'
 import { DEFAULT_HOMEPAGE_CONTENT } from '../../../lib/homepageContent.js'
 import { ANALYTICS_DEDUPE_WINDOWS, allowAnalyticsRequest, createAnalyticsDedupeKey, reserveAnalyticsDedupe, validateAnalyticsEntity, validateAnalyticsPayload } from '../../../lib/analyticsProtection.js'
@@ -223,27 +224,6 @@ function strip(doc) {
   if (!doc) return doc
   const { _id, password_hash, ...rest } = doc
   return rest
-}
-
-function normalizeIndianMobile(value) {
-  const raw = String(value ?? '').trim()
-  if (!raw || !/^[+\d\s().-]+$/.test(raw) || (raw.includes('+') && (!raw.startsWith('+') || raw.indexOf('+', 1) !== -1))) return null
-  const digits = raw.replace(/\D/g, '')
-  if (raw.startsWith('+') && !/^91[6-9]\d{9}$/.test(digits)) return null
-  const local = digits.length === 10 ? digits
-    : digits.length === 11 && digits.startsWith('0') ? digits.slice(1)
-    : digits.length === 12 && digits.startsWith('91') ? digits.slice(2)
-    : null
-  return local && /^[6-9]\d{9}$/.test(local) ? local : null
-}
-
-function guestContactMatches(order, contact) {
-  const suppliedEmail = String(contact ?? '').trim().toLowerCase()
-  const orderEmail = String(order.customer?.email ?? '').trim().toLowerCase()
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(suppliedEmail) && suppliedEmail === orderEmail) return true
-  const suppliedPhone = normalizeIndianMobile(contact)
-  return Boolean(suppliedPhone && [order.customer?.phone, order.customer?.whatsapp]
-    .some((phone) => normalizeIndianMobile(phone) === suppliedPhone))
 }
 
 function orderReferenceFilter(reference) {
@@ -2202,113 +2182,44 @@ async function handleRoute(request, { params }) {
     // 2. Verify Cashfree Payment
     if ((route === '/payments/cashfree/verify' || route === '/checkout/verify-payment') && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      const { order_id, cashfree_order_id, cf_payment_id } = body
-      const targetCfOrderId = cashfree_order_id || order_id
+      const reference = String(body.cashfree_order_id || body.order_id || '').trim()
+      if (!reference || reference.length > 100) return json({ error: 'Missing or invalid Cashfree order identifier' }, 400)
 
-      if (!targetCfOrderId) {
-        return json({ error: 'Missing Cashfree order identifier' }, 400)
+      const customer = await getCustomerFromRequest(request, database)
+      const contact = String(body.contact || '').trim()
+      if (!customer) {
+        const ipKey = crypto.createHash('sha256').update(getClientIp(request)).digest('hex')
+        const rate = await checkRateLimit(database, `guest_payment_verify:${ipKey}`, 8, 15)
+        if (!rate.allowed) return json({ error: 'Too many verification attempts. Please try again later.' }, 429)
       }
-
-      // Find target order in MongoDB
-      const order = await database.collection('orders').findOne({
-        $or: [
-          { cashfree_order_id: targetCfOrderId },
-          { 'payment.cashfree_order_id': targetCfOrderId },
-          { id: targetCfOrderId },
-          { order_number: targetCfOrderId },
-          { order_number: { $regex: new RegExp(`^${targetCfOrderId}$`, 'i') } },
-        ],
-      })
-
-      if (!order) {
-        return json({ error: 'Order not found' }, 404)
-      }
-
-      // Idempotency: If already paid, return immediately
-      if (order.payment_status === 'PAID') {
-        return json({
-          verified: true,
-          payment_status: 'PAID',
-          payment_id: order.payment?.cashfree_payment_id || order.payment_id,
-          order_number: order.order_number,
-          order_id: order.id,
-          order: strip(order),
-        })
-      }
-
-      if (!isCashfreeConfigured()) {
-        return json({ error: 'Cashfree API keys not configured on server' }, 500)
-      }
+      if (contact.length > 254) return json({ error: 'Invalid contact details.' }, 400)
 
       try {
-        const cfOrderId = order.cashfree_order_id || targetCfOrderId
-        const [cfOrderRes, cfPaymentsRes] = await Promise.all([
-          fetchCashfreeOrder(cfOrderId),
-          fetchCashfreePayments(cfOrderId).catch(() => ({ payments: [] })),
-        ])
-
-        const cfOrder = cfOrderRes.order
-        const successfulPayment = cfPaymentsRes.payments?.find((p) => p.payment_status === 'SUCCESS')
-        const isPaid = cfOrder?.order_status === 'PAID' || Boolean(successfulPayment)
-
-        if (isPaid) {
-          const verifiedPaymentId = successfulPayment?.cf_payment_id || cf_payment_id || cfOrder?.cf_order_id
-          const { order: finalizedOrder } = await finalizePaidOrder({
-            database,
-            orderId: order.id,
-            paymentId: verifiedPaymentId,
-            paymentData: successfulPayment || {},
-          })
-
-          const finalDoc = finalizedOrder || order
-
-          // Trigger idempotent order notifications safely
-          dispatchOrderNotifications({
-            database,
-            orderId: finalDoc.id || order.id,
-            event: 'ORDER_CONFIRMED',
-            appUrl: getCashfreePublicBaseUrl(request),
-          }).catch((e) => console.error('[Notifications:Verify] Error:', e.message))
-
-          return json({
-            verified: true,
-            payment_status: 'PAID',
-            payment_id: verifiedPaymentId,
-            order_number: finalDoc.order_number || order.order_number,
-            order_id: finalDoc.id || order.id,
-            order: strip(finalDoc),
-          })
-        }
-
-        const failedPayment = cfPaymentsRes.payments?.find((p) => p.payment_status === 'FAILED' || p.payment_status === 'USER_DROPPED' || p.payment_status === 'CANCELLED')
-        if (failedPayment || cfOrder?.order_status === 'EXPIRED') {
-          const failStatus = failedPayment?.payment_status || cfOrder?.order_status || 'FAILED'
-          await database.collection('orders').updateOne(
-            { id: order.id },
-            {
-              $set: {
-                'payment.status': failStatus,
-                'payment.failure_reason': failedPayment?.payment_message || `Payment ${failStatus}`,
-                updated_at: new Date(),
-              },
-            }
-          )
-          return json({
-            verified: false,
-            payment_status: failStatus,
-            error: failedPayment?.payment_message || 'Payment transaction failed or was cancelled.',
-          }, 400)
-        }
-
-        // Pending / Active
-        return json({
-          verified: false,
-          payment_status: cfOrder?.order_status || 'PENDING',
-          message: 'Payment verification in progress.',
+        const result = await verifyCashfreePayment({
+          database,
+          reference,
+          claimedReference: body.order_id && body.cashfree_order_id ? String(body.order_id).trim() : null,
+          customer,
+          contact,
+          cashfree: {
+            isConfigured: isCashfreeConfigured,
+            fetchOrder: fetchCashfreeOrder,
+            fetchPayments: fetchCashfreePayments,
+            finalizePaidOrder,
+          },
+          onPaid: (order) => {
+            dispatchOrderNotifications({
+              database,
+              orderId: order.id,
+              event: 'ORDER_CONFIRMED',
+              appUrl: getCashfreePublicBaseUrl(request),
+            }).catch((error) => console.error('[Notifications:Verify] Error:', error.message))
+          },
         })
-      } catch (err) {
-        console.error('[Cashfree:Verify] Error:', err.message)
-        return json({ error: err.message || 'Payment verification request failed.' }, 500)
+        return json(result.body, result.status)
+      } catch (error) {
+        console.error('[Cashfree:Verify] Error:', error.message)
+        return json({ error: 'Payment verification request failed.' }, 500)
       }
     }
 

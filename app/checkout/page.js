@@ -600,6 +600,7 @@ function CheckoutInner() {
                   body: {
                     order_id: placedOrder.id,
                     cashfree_order_id: cfData.order_id,
+                    contact: validation.sanitized.email || validation.sanitized.phone,
                   },
                 })
 
@@ -718,7 +719,11 @@ function CheckoutInner() {
     try {
       const result = await api('/payments/cashfree/verify', {
         method: 'POST',
-        body: { order_id: pendingVerification.order.id, cashfree_order_id: pendingVerification.cashfreeOrderId },
+        body: {
+          order_id: pendingVerification.order.id,
+          cashfree_order_id: pendingVerification.cashfreeOrderId,
+          contact: pendingVerification.order.customer?.email || pendingVerification.order.customer?.phone,
+        },
       })
       if (result?.verified && result.payment_status === 'PAID') {
         const paidOrder = result.order || pendingVerification.order
