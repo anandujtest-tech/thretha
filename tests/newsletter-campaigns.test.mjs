@@ -241,6 +241,8 @@ test('Admin token helper denies guests and non-admins', () => {
 
 test('eligible recipient search is paginated and excludes unsubscribed or unconsented records', async () => {
   const source = fs.readFileSync(new URL('../app/api/[[...path]]/route.js', import.meta.url), 'utf8')
+  const campaignImports = source.match(/import\s*\{([^}]+)\}\s*from\s*['"]\.\.\/\.\.\/\.\.\/lib\/newsletterCampaigns\.js['"]/)?.[1] || ''
+  assert.match(campaignImports, /\bactiveNewsletterAudienceFilter\b/, 'the real API route must import the filter used by its eligible-list branch')
   const branch = source.slice(source.indexOf("      if (route === '/admin/newsletter-subscribers' && method === 'GET')"), source.indexOf("      if (parts[0] === 'admin' && parts[1] === 'newsletter-subscribers'"))
   const context = vm.createContext({ URL, activeNewsletterAudienceFilter: (await import('../lib/newsletterCampaigns.js')).activeNewsletterAudienceFilter, escapeRegex: (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), json: (data, status = 200) => ({ status, data }) })
   vm.runInContext(`async function handle(request, database) { const route = '/admin/newsletter-subscribers'; const method = 'GET'; const parts = ['admin', 'newsletter-subscribers']; ${branch} }; this.handle = handle`, context)
@@ -252,6 +254,19 @@ test('eligible recipient search is paginated and excludes unsubscribed or uncons
   const searched = await context.handle(request('&q=buyer2'), db)
   assert.equal(searched.data.total, 1)
   assert.equal(searched.data.subscribers[0].id, 'sub-2')
+  const empty = await context.handle(request('&q=missing'), db)
+  assert.equal(empty.status, 200)
+  assert.equal(empty.data.total, 0)
+  assert.deepEqual(empty.data.subscribers, [])
+  assert.equal(empty.data.pages, 1)
+  const many = database({ subscribers: Array.from({ length: 55 }, (_, index) => subscriber(index + 1, { created_at: new Date(2026, 0, index + 1) })) })
+  const firstPage = await context.handle(request(''), many)
+  const secondPage = await context.handle({ url: `${appUrl}/api/admin/newsletter-subscribers?eligible=1&status=active&page=2` }, many)
+  assert.equal(firstPage.data.total, 55)
+  assert.equal(firstPage.data.subscribers.length, 50)
+  assert.equal(firstPage.data.pages, 2)
+  assert.equal(secondPage.data.subscribers.length, 5)
+  assert.equal(secondPage.data.page, 2)
 })
 
 test('real Admin campaign route branches enforce draft, audience, preview, confirmation and allowed actions', async () => {

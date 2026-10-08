@@ -111,7 +111,7 @@ import { ensureProductReviewIndexes, normalizeReviewText, isCloudinaryImageUrl }
 import { ensureBackInStockIndexes, isVariantAvailable, saveBackInStockSubscription, unsubscribeBackInStockSubscription, verifyBackInStockUnsubscribeToken, verifySignedBackInStockUnsubscribeToken } from '../../../lib/backInStock.js'
 import { ensureAbandonedCartIndexes, createCartKey, getCartRecoveryItems, createCartRecoveryToken, verifyCartRecoveryToken, backInStockUnsubscribeToken as createCartUnsubscribeToken, verifyBackInStockUnsubscribeToken as verifyCartUnsubscribeToken } from '../../../lib/abandonedCart.js'
 import { ensureNewsletterIndexes, createNewsletterUnsubscribeToken, verifyNewsletterUnsubscribeToken, normalizeNewsletterEmail, isValidNewsletterEmail } from '../../../lib/newsletter.js'
-import { validateNewsletterDraft, renderNewsletterEmail } from '../../../lib/newsletterCampaigns.js'
+import { activeNewsletterAudienceFilter, validateNewsletterDraft, renderNewsletterEmail } from '../../../lib/newsletterCampaigns.js'
 import { countNewsletterAudience, ensureNewsletterCampaignIndexes } from '../../../lib/newsletterScheduler.js'
 import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
 import { getProductEffectivePrice } from '../../../lib/productInventory.js'

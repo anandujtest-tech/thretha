@@ -177,6 +177,7 @@ export default function NewsletterCampaignManager() {
       </div>}
 
       {step === 'recipients' && <div className="space-y-4">
+        <button type="button" onClick={() => goTo('content')} className="min-h-11 border border-ink/20 px-4 text-xs">← Back to Content</button>
         <h3 ref={stepHeading} tabIndex={-1} className="font-display text-2xl text-ink outline-none">2. Recipients</h3>
         <p className="text-sm text-cocoa">Choose exactly who should receive this newsletter. Only active, consented subscribers are eligible.</p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -186,12 +187,13 @@ export default function NewsletterCampaignManager() {
         {draft.audience === 'selected' && <div className="space-y-3 border border-ink/15 bg-paper p-3 sm:p-4">
           <label className="block text-xs font-semibold text-ink">Search subscribers<input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setRecipientPage(1) }} placeholder="Search by email" className="mt-1 min-h-11 w-full min-w-0 border border-ink/20 bg-cream px-3 text-sm font-normal" /></label>
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span role="status">{draft.recipient_ids.length} selected</span><button type="button" disabled={!draft.recipient_ids.length} onClick={() => changeDraft({ recipient_ids: [] })} className="min-h-10 underline disabled:opacity-50">Clear selection</button></div>
-          {recipientLoading ? <p role="status" className="text-xs text-cocoa">Loading eligible subscribers…</p> : recipientError ? <p role="alert" className="text-xs text-coral">{recipientError}</p> : recipientRows.length ? <div className="max-h-72 space-y-1 overflow-y-auto">{recipientRows.map((subscriber) => <label key={subscriber.id} className="flex min-h-11 cursor-pointer items-center gap-3 border border-ink/10 p-2 text-xs"><input type="checkbox" checked={draft.recipient_ids.includes(subscriber.id)} onChange={(event) => { const checked = event.target.checked; setDraft((current) => ({ ...current, recipient_ids: checked ? [...current.recipient_ids, subscriber.id] : current.recipient_ids.filter((id) => id !== subscriber.id) })) }} /><span className="min-w-0 break-all">{subscriber.email_normalized}</span></label>)}</div> : <p className="text-xs text-cocoa">No eligible subscribers match this search.</p>}
+          {recipientLoading ? <p role="status" className="text-xs text-cocoa">Loading eligible subscribers…</p> : recipientError ? <p role="alert" className="text-xs text-coral">{recipientError}</p> : recipientRows.length ? <div className="max-h-72 space-y-1 overflow-y-auto">{recipientRows.map((subscriber) => <label key={subscriber.id} className="flex min-h-11 cursor-pointer items-center gap-3 border border-ink/10 p-2 text-xs"><input type="checkbox" checked={draft.recipient_ids.includes(subscriber.id)} onChange={(event) => { const checked = event.target.checked; setDraft((current) => ({ ...current, recipient_ids: checked ? [...current.recipient_ids, subscriber.id] : current.recipient_ids.filter((id) => id !== subscriber.id) })) }} /><span className="min-w-0 break-all">{subscriber.email_normalized}</span></label>)}</div> : <p className="text-xs text-cocoa">{search.trim() ? 'No eligible subscribers match this search.' : 'No eligible subscribers found.'}</p>}
           <div className="flex items-center justify-between text-xs"><button type="button" disabled={recipientPage <= 1 || recipientLoading} onClick={() => setRecipientPage((page) => page - 1)} className="min-h-10 border border-ink/20 px-3 disabled:opacity-50">Previous</button><span>Page {recipientPage} of {recipientPages}</span><button type="button" disabled={recipientPage >= recipientPages || recipientLoading} onClick={() => setRecipientPage((page) => page + 1)} className="min-h-10 border border-ink/20 px-3 disabled:opacity-50">Next</button></div>
         </div>}
       </div>}
 
       {step === 'review' && <div className="space-y-4">
+        <button type="button" onClick={() => goTo('recipients')} className="min-h-11 border border-ink/20 px-4 text-xs">← Back to Recipients</button>
         <h3 ref={stepHeading} tabIndex={-1} className="font-display text-2xl text-ink outline-none">3. Review Newsletter</h3>
         <dl className="grid gap-3 border border-ink/15 bg-paper p-4 text-sm sm:grid-cols-2"><div><dt className="text-xs text-cocoa">Campaign</dt><dd className="font-semibold break-words">{draft.name}</dd></div><div><dt className="text-xs text-cocoa">Subject</dt><dd className="font-semibold break-words">{draft.subject}</dd></div><div><dt className="text-xs text-cocoa">Recipients</dt><dd className="font-semibold">{draft.audience === 'selected' ? 'Selected subscribers' : 'All active subscribers'} · {reviewCount} eligible</dd></div><div><dt className="text-xs text-cocoa">Delivery</dt><dd className="font-semibold">Send now</dd></div></dl>
         <p className="text-sm font-semibold">This newsletter will be sent to {reviewCount} recipient{reviewCount === 1 ? '' : 's'}.</p>
@@ -208,6 +210,7 @@ export default function NewsletterCampaignManager() {
         }
       }} className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-3 sm:p-6">
         <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto bg-paper p-5 shadow-xl sm:p-7">
+          <button type="button" disabled={busy} onClick={() => goTo('review')} className="mb-3 min-h-11 border border-ink/20 px-4 text-xs disabled:opacity-50">← Back to Review</button>
           <h3 id="newsletter-confirm-title" ref={stepHeading} tabIndex={-1} className="font-display text-2xl text-ink outline-none">4. Ready to send?</h3>
           <p className="mt-3 text-sm font-semibold break-words">{draft.name}</p><p className="mt-1 text-xs text-cocoa break-words">{draft.subject}</p>
           <p className="mt-4 text-sm">{draft.audience === 'selected' ? 'Selected subscribers' : 'All active subscribers'} · <strong>{reviewCount} eligible recipient{reviewCount === 1 ? '' : 's'}</strong></p>
