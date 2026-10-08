@@ -317,10 +317,12 @@ function publicOrderReceipt(order) {
 function adminNewsletterCampaign(campaign) {
   return {
     id: campaign.id,
+    name: campaign.name || '',
     subject: campaign.subject,
     preview_text: campaign.preview_text || '',
     blocks: campaign.blocks || [],
     audience: campaign.audience || 'active',
+    recipient_ids: campaign.recipient_ids || [],
     status: campaign.status,
     recipient_count: campaign.recipient_count || 0,
     sent_count: campaign.sent_count || 0,
@@ -3619,7 +3621,10 @@ async function handleRoute(request, { params }) {
         const status = url.searchParams.get('status') || 'all'
         if (!['all', 'active', 'unsubscribed'].includes(status)) return json({ error: 'Invalid subscriber status filter.' }, 400)
         const search = String(url.searchParams.get('q') || '').trim().slice(0, 120)
-        const filter = { ...(status === 'all' ? {} : { status }), ...(search ? { email_normalized: { $regex: escapeRegex(search), $options: 'i' } } : {}) }
+        const eligible = url.searchParams.get('eligible') === '1'
+        const filter = eligible
+          ? { $and: [activeNewsletterAudienceFilter(), ...(search ? [{ email_normalized: { $regex: escapeRegex(search), $options: 'i' } }] : [])] }
+          : { ...(status === 'all' ? {} : { status }), ...(search ? { email_normalized: { $regex: escapeRegex(search), $options: 'i' } } : {}) }
         const subscribers = database.collection('newsletter_subscribers')
         if (url.searchParams.get('export') === 'csv') {
           const active = await subscribers.find({ status: 'active', ...(search ? { email_normalized: { $regex: escapeRegex(search), $options: 'i' } } : {}) }, { projection: { _id: 0, email_normalized: 1, consented_at: 1, created_at: 1 } }).sort({ created_at: -1 }).toArray()
@@ -3653,8 +3658,12 @@ async function handleRoute(request, { params }) {
       }
 
       // Newsletter campaigns use the existing Admin token and the protected cron worker.
-      if (route === '/admin/newsletter-campaigns/audience' && method === 'GET') {
-        return json({ audience: 'active', recipient_count: await countNewsletterAudience(database) })
+      if (route === '/admin/newsletter-campaigns/audience' && (method === 'GET' || method === 'POST')) {
+        const body = method === 'POST' ? await request.json().catch(() => null) : null
+        const ids = method === 'POST' ? body?.recipient_ids : []
+        if (!Array.isArray(ids)) return json({ error: 'Invalid recipient selection.' }, 400)
+        if (ids.length > 1000 || ids.some((id) => !/^[A-Za-z0-9_-]{1,80}$/.test(id)) || new Set(ids).size !== ids.length) return json({ error: 'Invalid recipient selection.' }, 400)
+        return json({ audience: ids.length ? 'selected' : 'active', recipient_count: await countNewsletterAudience(database, null, ids.length ? ids : null) })
       }
       if (route === '/admin/newsletter-campaigns/preview' && method === 'POST') {
         const body = await request.json().catch(() => null)
@@ -3669,7 +3678,7 @@ async function handleRoute(request, { params }) {
       }
       if (route === '/admin/newsletter-campaigns' && method === 'GET') {
         const campaigns = await database.collection('newsletter_campaigns').find({}, {
-          projection: { _id: 0, id: 1, subject: 1, status: 1, recipient_count: 1, sent_count: 1, failed_count: 1, unknown_count: 1, skipped_count: 1, created_at: 1, completed_at: 1 },
+          projection: { _id: 0, id: 1, name: 1, subject: 1, status: 1, recipient_count: 1, sent_count: 1, failed_count: 1, unknown_count: 1, skipped_count: 1, created_at: 1, completed_at: 1 },
         }).sort({ created_at: -1 }).limit(50).toArray()
         return json({ campaigns })
       }
@@ -3718,7 +3727,7 @@ async function handleRoute(request, { params }) {
             if (campaign.status !== 'DRAFT') return json({ error: 'Only drafts can be queued.' }, 409)
             if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) return json({ error: 'Newsletter email is not configured.' }, 503)
             const queuedAt = new Date()
-            const recipientCount = await countNewsletterAudience(database, queuedAt)
+            const recipientCount = await countNewsletterAudience(database, queuedAt, campaign.audience === 'selected' ? campaign.recipient_ids || [] : null)
             if (!recipientCount) return json({ error: 'No active subscribers available.' }, 409)
             const changed = await campaigns.updateOne({ id: campaignId, status: 'DRAFT' }, {
               $set: { status: 'QUEUED', queued_at: queuedAt, recipient_count: recipientCount, cursor_email: '', retry_only: false, updated_at: queuedAt },

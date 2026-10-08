@@ -35,7 +35,8 @@ function matches(document, filter = {}) {
       if (operator === '$ne') return !equal(actual, target)
       if (operator === '$in') return target.includes(actual)
       if (operator === '$type') return target === 'date' && actual instanceof Date
-      if (operator === '$regex') return target.test(String(actual || ''))
+      if (operator === '$regex') return (target instanceof RegExp ? target : new RegExp(target, expected.$options || '')).test(String(actual || ''))
+      if (operator === '$options') return true
       throw Error(`Unsupported test operator ${operator}`)
     })
     return equal(actual, expected)
@@ -54,6 +55,7 @@ class Collection {
     let items = this.documents.filter((item) => matches(item, filter))
     const cursor = {
       sort: (spec) => { this.sortItems(items, spec); return cursor },
+      skip: (number) => { items = items.slice(number); return cursor },
       limit: (limit) => { items = items.slice(0, limit); return cursor },
       toArray: async () => [...items],
     }
@@ -101,6 +103,27 @@ test('draft validation rejects missing fields, unsafe URLs, arbitrary sender and
     { ...draft, audience: 'all' }, { ...draft, from: 'attacker@example.com' },
     { ...draft, subject: 'Title\nBcc: bad@example.com' },
   ]) assert.ok(validateNewsletterDraft(input, appUrl).error)
+})
+
+test('selected audience validates identifiers and preserves existing active drafts', () => {
+  assert.equal(validateNewsletterDraft(draft, appUrl).value.audience, 'active')
+  const selected = validateNewsletterDraft({ ...draft, name: 'Festive audience', audience: 'selected', recipient_ids: ['sub-1', 'sub-2'] }, appUrl)
+  assert.equal(selected.value.name, 'Festive audience')
+  assert.deepEqual(selected.value.recipient_ids, ['sub-1', 'sub-2'])
+  assert.ok(validateNewsletterDraft({ ...draft, audience: 'selected', recipient_ids: [] }, appUrl).error)
+  assert.ok(validateNewsletterDraft({ ...draft, audience: 'selected', recipient_ids: ['sub-1', 'sub-1'] }, appUrl).error)
+  assert.ok(validateNewsletterDraft({ ...draft, audience: 'active', recipient_ids: ['sub-1'] }, appUrl).error)
+  assert.deepEqual(validateNewsletterDraft({ ...draft, audience: 'active', recipient_ids: [] }, appUrl).value.recipient_ids, [])
+})
+
+test('selected campaigns count and deliver only active consented selected IDs', async () => {
+  const contacts = [subscriber(1), subscriber(2), subscriber(3), subscriber(4, { status: 'unsubscribed' })]
+  const db = database({ subscribers: contacts, campaigns: [campaign({ audience: 'selected', recipient_ids: ['sub-1', 'sub-2', 'sub-4'], recipient_count: 2 })] })
+  assert.equal(await countNewsletterAudience(db, queuedAt, ['sub-1', 'sub-2', 'sub-4']), 2)
+  const sent = []
+  await processNewsletterQueue(db, { appUrl, secret, now: queuedAt, send: async ({ to }) => { sent.push(to); return { id: 'mock' } } })
+  assert.deepEqual(sent.sort(), ['buyer1@example.com', 'buyer2@example.com'])
+  assert.equal(db.collections.newsletter_campaigns.documents[0].status, 'COMPLETED')
 })
 
 test('email preview and send share one escaped responsive template with a signed unsubscribe link', () => {
@@ -216,6 +239,21 @@ test('Admin token helper denies guests and non-admins', () => {
   assert.ok(source.includes("if (!auth) return json({ error: 'Unauthorized' }, 401)"))
 })
 
+test('eligible recipient search is paginated and excludes unsubscribed or unconsented records', async () => {
+  const source = fs.readFileSync(new URL('../app/api/[[...path]]/route.js', import.meta.url), 'utf8')
+  const branch = source.slice(source.indexOf("      if (route === '/admin/newsletter-subscribers' && method === 'GET')"), source.indexOf("      if (parts[0] === 'admin' && parts[1] === 'newsletter-subscribers'"))
+  const context = vm.createContext({ URL, activeNewsletterAudienceFilter: (await import('../lib/newsletterCampaigns.js')).activeNewsletterAudienceFilter, escapeRegex: (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), json: (data, status = 200) => ({ status, data }) })
+  vm.runInContext(`async function handle(request, database) { const route = '/admin/newsletter-subscribers'; const method = 'GET'; const parts = ['admin', 'newsletter-subscribers']; ${branch} }; this.handle = handle`, context)
+  const db = database({ subscribers: [subscriber(1), subscriber(2), subscriber(3, { status: 'unsubscribed' }), subscriber(4, { consented_at: null }), subscriber(5, { email_normalized: 'invalid' })] })
+  const request = (query) => ({ url: `${appUrl}/api/admin/newsletter-subscribers?eligible=1&status=active&page=1${query}` })
+  const all = await context.handle(request(''), db)
+  assert.equal(all.data.total, 2)
+  assert.deepEqual(all.data.subscribers.map((item) => item.id).sort(), ['sub-1', 'sub-2'])
+  const searched = await context.handle(request('&q=buyer2'), db)
+  assert.equal(searched.data.total, 1)
+  assert.equal(searched.data.subscribers[0].id, 'sub-2')
+})
+
 test('real Admin campaign route branches enforce draft, audience, preview, confirmation and allowed actions', async () => {
   const source = fs.readFileSync(new URL('../app/api/[[...path]]/route.js', import.meta.url), 'utf8')
   const authHelpers = source.slice(source.indexOf('function getToken('), source.indexOf('const VISITOR_EVENT_NAMES'))
@@ -236,6 +274,9 @@ test('real Admin campaign route branches enforce draft, audience, preview, confi
   assert.equal(created.data.campaign.status, 'DRAFT')
   const campaignId = created.data.campaign.id
   assert.equal((await context.handle(request('/admin/newsletter-campaigns/audience'), db)).data.recipient_count, 1)
+  assert.equal((await context.handle(request('/admin/newsletter-campaigns/audience', 'POST', { recipient_ids: ['sub-1'] }), db)).data.recipient_count, 1)
+  assert.equal((await context.handle(request('/admin/newsletter-campaigns/audience', 'POST', { recipient_ids: ['missing'] }), db)).data.recipient_count, 0)
+  assert.equal((await context.handle(request('/admin/newsletter-campaigns/audience', 'POST', { recipient_ids: ['sub-1', 'sub-1'] }), db)).status, 400)
   const preview = await context.handle(request('/admin/newsletter-campaigns/preview', 'POST', draft), db)
   assert.equal(preview.status, 200)
   assert.ok(preview.data.html.includes('Unsubscribe'))
@@ -251,6 +292,15 @@ test('real Admin campaign route branches enforce draft, audience, preview, confi
   const noAudience = database()
   const emptyDraft = await context.handle(request('/admin/newsletter-campaigns', 'POST', draft), noAudience)
   assert.equal((await context.handle(request(`/admin/newsletter-campaigns/${emptyDraft.data.campaign.id}/send`, 'POST'), noAudience)).status, 409)
+
+  const selectedDb = database({ subscribers: [subscriber(1), subscriber(2), subscriber(3, { status: 'unsubscribed' })] })
+  const selectedDraft = { ...draft, name: 'Selected edit', audience: 'selected', recipient_ids: ['sub-1', 'sub-3'] }
+  const savedSelected = await context.handle(request('/admin/newsletter-campaigns', 'POST', selectedDraft), selectedDb)
+  assert.equal(savedSelected.data.campaign.name, 'Selected edit')
+  assert.deepEqual(selectedDb.collections.newsletter_campaigns.documents[0].recipient_ids, ['sub-1', 'sub-3'])
+  const selectedQueued = await context.handle(request(`/admin/newsletter-campaigns/${savedSelected.data.campaign.id}/send`, 'POST'), selectedDb)
+  assert.equal(selectedQueued.data.campaign.recipient_count, 1)
+  assert.equal((await context.handle(request(`/admin/newsletter-campaigns/${savedSelected.data.campaign.id}/send`, 'POST'), selectedDb)).status, 409)
 })
 
 test('1,000 mock recipients are processed in bounded cron batches without duplicate delivery', async () => {
