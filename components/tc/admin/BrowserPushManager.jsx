@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bell, Pause, Play, Pencil, RefreshCw, Send, XCircle } from 'lucide-react'
 import { api, auth } from '@/lib/tc'
+import CampaignImageUpload from './CampaignImageUpload'
 
 const WEEKDAYS = [
   ['Monday', 1], ['Tuesday', 2], ['Wednesday', 3], ['Thursday', 4],
@@ -55,6 +56,7 @@ export default function BrowserPushManager() {
   const [form, setForm] = useState(emptyForm)
   const [editing, setEditing] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [imageUploading, setImageUploading] = useState(false)
   const submitLock = useRef(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -114,7 +116,7 @@ export default function BrowserPushManager() {
 
   const submit = async (event) => {
     event.preventDefault()
-    if (submitLock.current) return
+    if (submitLock.current || imageUploading) return
     if (form.send_mode === 'now' && !window.confirm('Send this notification to all active subscribers? This cannot be undone.')) return
     submitLock.current = true
     setBusy(true); setError(''); setNotice('')
@@ -212,7 +214,11 @@ export default function BrowserPushManager() {
           <label className="text-xs text-cocoa sm:col-span-2">Message<textarea required maxLength={500} rows={2} value={form.message} onChange={(event) => update('message', event.target.value)} className="mt-1 block w-full border border-ink/15 bg-paper p-2.5 text-sm text-ink" /></label>
           <label className="text-xs text-cocoa">Destination path<input required value={form.destination} onChange={(event) => update('destination', event.target.value)} placeholder="/ or /category/sarees" className="mt-1 block w-full border border-ink/15 bg-paper p-2.5 text-sm text-ink" /></label>
           <label className="text-xs text-cocoa">Button text (optional)<input maxLength={32} value={form.action_text} onChange={(event) => update('action_text', event.target.value)} className="mt-1 block w-full border border-ink/15 bg-paper p-2.5 text-sm text-ink" /></label>
-          <label className="text-xs text-cocoa sm:col-span-2">Image URL (optional, HTTPS or internal path)<input value={form.image} onChange={(event) => update('image', event.target.value)} className="mt-1 block w-full border border-ink/15 bg-paper p-2.5 text-sm text-ink" /></label>
+          <div className="space-y-2 sm:col-span-2">
+            <span className="text-xs text-cocoa">Image (optional)</span>
+            <CampaignImageUpload value={form.image} onChange={(url) => update('image', url)} folder="notifications" previewClassName="max-h-36 w-48 max-w-full object-contain bg-paper" onUploadStart={() => setImageUploading(true)} onUploadEnd={() => setImageUploading(false)} />
+            <label className="block text-xs text-cocoa">Image URL (HTTPS or internal path)<input value={form.image} onChange={(event) => update('image', event.target.value)} className="mt-1 block w-full border border-ink/15 bg-paper p-2.5 text-sm text-ink" /></label>
+          </div>
         </div>
         <div className="flex flex-wrap gap-4 border-y border-ink/10 py-3 text-xs text-ink">
           {[["now", 'Send now'], ['once', 'Schedule once'], ['repeat', 'Repeat']].map(([value, label]) => <label key={value} className="inline-flex items-center gap-2"><input type="radio" name="push-send-mode" checked={form.send_mode === value} onChange={() => update('send_mode', value)} />{label}</label>)}
@@ -232,7 +238,7 @@ export default function BrowserPushManager() {
           {(form.schedule.frequency === 'weekly' || form.schedule.frequency === 'custom_days') && <div className="flex flex-wrap gap-x-4 gap-y-2">{WEEKDAYS.map(([day, number]) => <label key={day} className="inline-flex items-center gap-1.5 text-xs text-ink"><input type="checkbox" checked={form.schedule.days_of_week.includes(number)} onChange={() => toggleDay(number)} />{day}</label>)}</div>}
           <label className="block max-w-xs text-xs text-cocoa">End date (leave blank for no end date)<input type="date" min={form.schedule.start_date} value={form.schedule.end_date} onChange={(event) => setSchedule('end_date', event.target.value)} className="mt-1 block w-full border border-ink/15 bg-paper p-2.5 text-ink" /></label>
         </div>}
-        <div className="flex flex-wrap items-center gap-3"><button type="submit" disabled={busy || loading || !data?.configured || (form.send_mode === 'now' && !data?.enabled)} className="inline-flex items-center gap-2 bg-ink px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-paper disabled:opacity-50"><Send className="h-3.5 w-3.5" />{busy ? 'Saving…' : form.send_mode === 'now' ? 'Send now' : editing ? 'Save changes' : 'Schedule notification'}</button>{!data?.enabled && form.send_mode === 'now' && <span className="text-xs text-cocoa-light">Enable the global setting to send.</span>}</div>
+        <div className="flex flex-wrap items-center gap-3"><button type="submit" disabled={busy || imageUploading || loading || !data?.configured || (form.send_mode === 'now' && !data?.enabled)} className="inline-flex items-center gap-2 bg-ink px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-paper disabled:opacity-50"><Send className="h-3.5 w-3.5" />{busy ? 'Saving…' : form.send_mode === 'now' ? 'Send now' : editing ? 'Save changes' : 'Schedule notification'}</button>{!data?.enabled && form.send_mode === 'now' && <span className="text-xs text-cocoa-light">Enable the global setting to send.</span>}</div>
       </form>
 
       {error && <p role="alert" className="mt-4 border border-rose-800/20 bg-rose-50 p-3 text-xs text-rose-900">{error}</p>}
