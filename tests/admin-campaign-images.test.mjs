@@ -39,7 +39,7 @@ test('shared signature endpoint is Admin-only and never returns the Cloudinary s
   const authHelpers = source.slice(source.indexOf('function getToken('), source.indexOf('const VISITOR_EVENT_NAMES'))
   const branch = source.slice(source.indexOf("      if (route === '/admin/media/signature'"), source.indexOf("      if (route === '/admin/me'"))
   const secret = 'test-cloudinary-secret'
-  const context = vm.createContext({ jwt, JWT_SECRET: 'test-jwt-secret', process: { env: { CLOUDINARY_CLOUD_NAME: 'example', CLOUDINARY_API_KEY: 'public-test-key', CLOUDINARY_API_SECRET: secret } }, cloudinaryEnabled: () => true, cloudinary: { utils: { api_sign_request: () => 'test-signature' } }, Date, json: (data, status = 200) => ({ status, data }) })
+  const context = vm.createContext({ jwt, getSigningSecret: () => 'test-jwt-secret', process: { env: { CLOUDINARY_CLOUD_NAME: 'example', CLOUDINARY_API_KEY: 'public-test-key', CLOUDINARY_API_SECRET: secret } }, cloudinaryEnabled: () => true, cloudinary: { utils: { api_sign_request: () => 'test-signature' } }, Date, json: (data, status = 200) => ({ status, data }) })
   vm.runInContext(`${authHelpers}\nasync function handle(request) { const route = '/admin/media/signature'; const method = 'POST'; const parts = ['admin', 'media', 'signature']; const auth = requireAuth(request); if (!auth) return json({ error: 'Unauthorized' }, 401); ${branch} }; this.handle = handle`, context)
   const request = (role) => ({ headers: { get: () => role ? `Bearer ${jwt.sign({ role }, 'test-jwt-secret')}` : '' }, json: async () => ({ folder: 'newsletters', resourceType: 'image' }) })
   assert.equal((await context.handle(request())).status, 401)

@@ -4,6 +4,7 @@ import { getAppBaseUrl } from '@/lib/auth'
 import { ensureBackInStockIndexes, processBackInStockSubscriptions } from '@/lib/backInStock'
 import { ensureAbandonedCartIndexes, processAbandonedCartReminders } from '@/lib/abandonedCart'
 import { processNewsletterQueue } from '@/lib/newsletterScheduler'
+import { getSigningSecret } from '@/lib/signingSecret'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,19 +33,20 @@ export async function GET(request) {
   }
   try {
     const database = await getDatabase()
+    const signingSecret = getSigningSecret()
     const [push, backInStock, abandonedCart, newsletter] = await Promise.all([
       processPushQueue(database),
       processBackInStockSubscriptions(database, {
         appUrl: getAppBaseUrl(request),
-        secret: process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret',
+        secret: signingSecret,
       }),
       processAbandonedCartReminders(database, {
         appUrl: getAppBaseUrl(request),
-        secret: process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret',
+        secret: signingSecret,
       }),
       processNewsletterQueue(database, {
         appUrl: getAppBaseUrl(request),
-        secret: process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret',
+        secret: signingSecret,
       }).catch(() => {
         console.error('[Newsletter Cron] Batch processing failed; it can resume on the next invocation.')
         return { status: 'error', processed: 0 }

@@ -116,6 +116,10 @@ import { ensureNewsletterIndexes, createNewsletterUnsubscribeToken, verifyNewsle
 import { activeNewsletterAudienceFilter, validateNewsletterDraft, renderNewsletterEmail } from '../../../lib/newsletterCampaigns.js'
 import { countNewsletterAudience, ensureNewsletterCampaignIndexes } from '../../../lib/newsletterScheduler.js'
 import { handlePublicProducts } from '../../../lib/publicCatalog.js'
+import { getSigningSecret } from '../../../lib/signingSecret.js'
+import { publicSettings, publicProduct, publicCombo, publicOccasion, publicProfile, publicAddress, publicOrder, validateProfilePatch } from '../../../lib/publicResponses.js'
+import { parseAccountOrderPagination, listCustomerOrders } from '../../../lib/accountOrders.js'
+import { findCustomerOrder, findCustomerAddress } from '../../../lib/customerOwnership.js'
 import { createMobileSession, getMobileBearerToken, revokeMobileSession } from '../../../lib/mobileSessions.js'
 import {
   MobileGoogleAuthError, mobileGoogleConfig, startMobileGoogleAuth,
@@ -131,8 +135,6 @@ import { ANALYTICS_DEDUPE_WINDOWS, allowAnalyticsRequest, createAnalyticsDedupeK
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
-
-const JWT_SECRET = process.env.JWT_SECRET || 'thretha_dev_secret'
 
 // ---------- Mongo ----------
 let dbPromise
@@ -351,7 +353,7 @@ function requireAuth(request) {
   const token = getToken(request)
   if (!token) return null
   try {
-    const decoded = jwt.verify(token, JWT_SECRET)
+    const decoded = jwt.verify(token, getSigningSecret())
     if (!decoded || decoded.role !== 'admin') {
       return null
     }
@@ -1283,7 +1285,7 @@ async function handleRoute(request, { params }) {
           subscriber = duplicate
         }
       }
-      const unsubscribeToken = createNewsletterUnsubscribeToken(subscriber.id, JWT_SECRET)
+      const unsubscribeToken = createNewsletterUnsubscribeToken(subscriber.id, getSigningSecret())
       const unsubscribeUrl = `${getAppBaseUrl(request)}/newsletter/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
       let unsubscribeEmailSent = false
       try {
@@ -1303,7 +1305,7 @@ async function handleRoute(request, { params }) {
 
     if (route === '/newsletter/unsubscribe' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      const id = verifyNewsletterUnsubscribeToken(body.token, JWT_SECRET)
+      const id = verifyNewsletterUnsubscribeToken(body.token, getSigningSecret())
       if (!id) return json({ error: 'This unsubscribe link is invalid or has expired.' }, 400)
       const subscribers = database.collection('newsletter_subscribers')
       const existing = await subscribers.findOne({ id }, { projection: { status: 1 } })
@@ -1336,7 +1338,7 @@ async function handleRoute(request, { params }) {
 
     if (route === '/back-in-stock/unsubscribe' && method === 'GET') {
       const token = new URL(request.url).searchParams.get('token') || ''
-      const id = verifySignedBackInStockUnsubscribeToken(token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      const id = verifySignedBackInStockUnsubscribeToken(token, getSigningSecret())
       if (!id) return json({ error: 'Unsubscribe link is invalid or expired.' }, 400)
       const subscription = await database.collection('back_in_stock_subscriptions').findOne({ id }, { projection: { _id: 1 } })
       if (!subscription) return json({ error: 'This stock alert could not be found.' }, 404)
@@ -1345,7 +1347,7 @@ async function handleRoute(request, { params }) {
 
     if (route === '/back-in-stock/unsubscribe' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      const id = verifySignedBackInStockUnsubscribeToken(body.token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      const id = verifySignedBackInStockUnsubscribeToken(body.token, getSigningSecret())
       if (!id) return json({ error: 'Unsubscribe link is invalid or expired.' }, 400)
       const result = await unsubscribeBackInStockSubscription(database, id)
       if (!result.found) return json({ error: 'This stock alert could not be found.' }, 404)
@@ -1390,12 +1392,12 @@ async function handleRoute(request, { params }) {
         }
       }
       if (!reminderId) return json({ error: 'This bag could not be saved for a reminder.' }, 409)
-      return json({ ok: true, active: true, unsubscribeToken: createCartUnsubscribeToken(reminderId, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret'), message: 'We will send one reminder if this bag is still waiting in two hours.' }, 201)
+      return json({ ok: true, active: true, unsubscribeToken: createCartUnsubscribeToken(reminderId, getSigningSecret()), message: 'We will send one reminder if this bag is still waiting in two hours.' }, 201)
     }
 
     if (route === '/abandoned-cart/unsubscribe' && method === 'GET') {
       const token = new URL(request.url).searchParams.get('token') || ''
-      const id = verifyCartUnsubscribeToken(token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      const id = verifyCartUnsubscribeToken(token, getSigningSecret())
       if (!id) return json({ error: 'Unsubscribe link is invalid or expired.' }, 400)
       const result = await database.collection('abandoned_cart_reminders').updateOne({ id, status: { $ne: 'unsubscribed' } }, { $set: { status: 'unsubscribed', unsubscribed_at: new Date(), updated_at: new Date() } })
       return json({ ok: true, unsubscribed: result.matchedCount > 0 })
@@ -1403,7 +1405,7 @@ async function handleRoute(request, { params }) {
 
     if (route === '/abandoned-cart/unsubscribe' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      const id = verifyCartUnsubscribeToken(body.token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      const id = verifyCartUnsubscribeToken(body.token, getSigningSecret())
       if (!id) return json({ error: 'Reminder preference is invalid.' }, 400)
       const collection = database.collection('abandoned_cart_reminders')
       const result = await collection.updateOne({ id, status: { $ne: 'unsubscribed' } }, { $set: { status: 'unsubscribed', unsubscribed_at: new Date(), updated_at: new Date() } })
@@ -1413,7 +1415,7 @@ async function handleRoute(request, { params }) {
 
     if (route === '/abandoned-cart/recover' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      const id = verifyCartRecoveryToken(body.token, process.env.JWT_SECRET || process.env.AUTH_SECRET || 'thretha_dev_secret')
+      const id = verifyCartRecoveryToken(body.token, getSigningSecret())
       if (!id) return json({ error: 'This cart recovery link is invalid or has expired.' }, 400)
       const items = await getCartRecoveryItems(database, id)
       if (!items) return json({ error: 'This cart can no longer be restored.' }, 404)
@@ -1472,13 +1474,13 @@ async function handleRoute(request, { params }) {
     // ===== PUBLIC SETTINGS =====
     if (route === '/settings' && method === 'GET') {
       const s = await database.collection('settings').findOne({ id: 'global' })
-      return json(normalizeSettingsDoc(s), 200, { 'Cache-Control': 'no-store, max-age=0' })
+      return json(publicSettings(s), 200, { 'Cache-Control': 'no-store, max-age=0' })
     }
 
     if (route === '/occasions' && method === 'GET') {
       const settings = await database.collection('settings').findOne({ id: 'global' }, { projection: { shop_by_occasion: 1 } })
       if (settings?.shop_by_occasion?.enabled === false) return json({ enabled: false, occasions: [] })
-      return json({ enabled: true, occasions: normalizeOccasions(settings?.shop_by_occasion?.occasions ?? DEFAULT_OCCASIONS).filter((occasion) => occasion.active) })
+      return json({ enabled: true, occasions: normalizeOccasions(settings?.shop_by_occasion?.occasions ?? DEFAULT_OCCASIONS).filter((occasion) => occasion.active).map(publicOccasion) })
     }
 
     // ===== PUBLIC INSTAGRAM FEED =====
@@ -1798,7 +1800,7 @@ async function handleRoute(request, { params }) {
         ],
       })
       if (!p) return json({ error: 'Product not found' }, 404)
-      return json(strip(p))
+      return json(publicProduct(p))
     }
 
     // ===== PROMOTIONS & COUPONS (public validation & preview) =====
@@ -1888,7 +1890,7 @@ async function handleRoute(request, { params }) {
       const populated = await Promise.all(
         activeCombos.map((combo) => populateComboSlots({ database, combo }))
       )
-      return json(populated.map(strip))
+      return json(populated.map(publicCombo))
     }
 
     if (route === '/combos/validate' && method === 'POST') {
@@ -1937,7 +1939,7 @@ async function handleRoute(request, { params }) {
       }
 
       const populated = await populateComboSlots({ database, combo })
-      return json(strip(populated))
+      return json(publicCombo(populated))
     }
 
     // ===== ORDER TRACKING =====
@@ -2137,7 +2139,7 @@ async function handleRoute(request, { params }) {
           cf_order_id: cfRes.cf_order_id,
           order_number: orderNumber,
           mode: getCashfreeConfig().env,
-          order: strip(order),
+          order: publicOrder(order),
         })
       } catch (err) {
         console.error('[Cashfree:CreateOrder] Error:', err.message)
@@ -2599,7 +2601,7 @@ async function handleRoute(request, { params }) {
 
           return json({
             ok: true,
-            order: strip(order),
+            order: publicOrder(order),
             cashfree: {
               configured: true,
               payment_session_id: cfRes.payment_session_id,
@@ -2689,7 +2691,7 @@ async function handleRoute(request, { params }) {
 
       const settings = await database.collection('settings').findOne({ id: 'global' })
       const wa = buildWhatsAppMessage(order, settings)
-      return json({ ok: true, order: strip(order), whatsapp: wa })
+      return json({ ok: true, order: publicOrder(order), whatsapp: wa })
     }
 
     // ==========================================
@@ -3154,15 +3156,13 @@ async function handleRoute(request, { params }) {
       if (!customer) return json({ error: 'Please sign in to access your profile' }, 401)
 
       if (method === 'GET') {
-        return json({ user: customer })
+        return json({ user: publicProfile(customer) })
       }
 
       if (method === 'PATCH') {
-        const { name, phone, image } = await request.json().catch(() => ({}))
-        const updateData = { updated_at: new Date() }
-        if (name && typeof name === 'string') updateData.name = name.trim()
-        if (phone !== undefined) updateData.phone = String(phone).trim()
-        if (image !== undefined) updateData.image = image
+        const validation = validateProfilePatch(await request.json().catch(() => null))
+        if (validation.error) return json({ error: validation.error }, 400)
+        const updateData = { ...validation.update, updated_at: new Date() }
 
         await database.collection('users').updateOne(
           { id: customer.id },
@@ -3170,7 +3170,7 @@ async function handleRoute(request, { params }) {
         )
 
         const updated = await database.collection('users').findOne({ id: customer.id })
-        return json({ ok: true, user: strip(updated) })
+        return json({ ok: true, user: publicProfile(updated) })
       }
     }
 
@@ -3193,12 +3193,7 @@ async function handleRoute(request, { params }) {
       }
 
       // Query ONLY orders strictly owned by this authenticated customer
-      const customerOrders = await database.collection('orders')
-        .find({ userId: customer.id })
-        .sort({ created_at: -1 })
-        .toArray()
-
-      return json({ orders: customerOrders.map(strip) })
+      return json(await listCustomerOrders(database.collection('orders'), customer.id, parseAccountOrderPagination(request.url)))
     }
 
     // Customer Single Order (GET with IDOR Ownership Verification)
@@ -3207,40 +3202,19 @@ async function handleRoute(request, { params }) {
       if (!customer) return json({ error: 'Please sign in to view this order' }, 401)
 
       const orderId = route.split('/')[3]
-      const order = await database.collection('orders').findOne({
-        $or: [
-          { id: orderId },
-          { order_number: orderId },
-          { order_number: { $regex: new RegExp(`^${orderId}$`, 'i') } },
-        ],
-      })
-
-      if (!order) {
+      const lookup = await findCustomerOrder(database, orderId, customer, { claimGuest: true })
+      const order = lookup.order
+      if (lookup.status === 404) {
         return json({ error: 'Order not found' }, 404)
       }
-
-      // If it is an unclaimed guest order with matching email, claim it now
-      const isUnclaimedGuest = (!order.userId || order.userId === '') &&
-        order.customer?.email &&
-        order.customer.email.toLowerCase() === (customer.email || '').toLowerCase()
-
-      if (isUnclaimedGuest) {
-        await database.collection('orders').updateOne(
-          { id: order.id, $or: [{ userId: null }, { userId: { $exists: false } }, { userId: '' }] },
-          { $set: { userId: customer.id, updated_at: new Date() } }
-        )
-        order.userId = customer.id
-      }
-
-      // Authoritative ownership check: Must strictly match customer.id
-      if (order.userId !== customer.id) {
+      if (lookup.status !== 200) {
         return json({ error: 'You are not authorized to view this order.' }, 403)
       }
 
       const cancellationEligibility = checkOrderCancellationEligibility(order)
 
       return json({
-        order: strip(order),
+        order: publicOrder(order),
         cancellation_eligibility: cancellationEligibility,
       })
     }
@@ -3251,21 +3225,12 @@ async function handleRoute(request, { params }) {
       if (!customer) return json({ error: 'Please sign in to check cancellation eligibility' }, 401)
 
       const orderId = route.split('/')[3]
-      const order = await database.collection('orders').findOne({
-        $or: [
-          { id: orderId },
-          { order_number: orderId },
-          { order_number: { $regex: new RegExp(`^${orderId}$`, 'i') } },
-        ],
-      })
-
-      if (!order) return json({ error: 'Order not found' }, 404)
-
-      if (order.userId !== customer.id) {
+      const lookup = await findCustomerOrder(database, orderId, customer)
+      if (lookup.status === 404) return json({ error: 'Order not found' }, 404)
+      if (lookup.status !== 200) {
         return json({ error: 'You are not authorized to view this order' }, 403)
       }
-
-      const eligibility = checkOrderCancellationEligibility(order)
+      const eligibility = checkOrderCancellationEligibility(lookup.order)
       return json({ ok: true, ...eligibility })
     }
 
@@ -3315,7 +3280,7 @@ async function handleRoute(request, { params }) {
           .find({ userId: customer.id })
           .sort({ isDefault: -1, created_at: -1 })
           .toArray()
-        return json({ addresses: addresses.map(strip) })
+        return json({ addresses: addresses.map(publicAddress) })
       }
 
       if (method === 'POST') {
@@ -3358,7 +3323,7 @@ async function handleRoute(request, { params }) {
         }
 
         await database.collection('addresses').insertOne(addressDoc)
-        return json({ ok: true, address: strip(addressDoc) }, 201)
+        return json({ ok: true, address: publicAddress(addressDoc) }, 201)
       }
     }
 
@@ -3368,7 +3333,7 @@ async function handleRoute(request, { params }) {
       if (!customer) return json({ error: 'Please sign in' }, 401)
 
       const addressId = route.split('/')[3]
-      const existing = await database.collection('addresses').findOne({ id: addressId, userId: customer.id })
+      const existing = await findCustomerAddress(database, addressId, customer.id)
 
       if (!existing) {
         return json({ error: 'Address not found or unauthorized' }, 404)
@@ -3432,7 +3397,7 @@ async function handleRoute(request, { params }) {
         )
 
         const updatedDoc = await database.collection('addresses').findOne({ id: addressId, userId: customer.id })
-        return json({ ok: true, address: strip(updatedDoc) })
+        return json({ ok: true, address: publicAddress(updatedDoc) })
       }
     }
 
@@ -3553,7 +3518,7 @@ async function handleRoute(request, { params }) {
       if (!user || !(await bcrypt.compare(password || '', user.password_hash))) {
         return json({ error: 'Invalid email or password' }, 401)
       }
-      const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' })
+      const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, getSigningSecret(), { expiresIn: '7d' })
       return json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } })
     }
 

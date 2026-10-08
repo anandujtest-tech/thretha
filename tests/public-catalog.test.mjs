@@ -104,6 +104,8 @@ test('real products handler keeps website array and paginates explicit mobile re
   const legacy = await request('/products', fixture)
   assert.equal(Array.isArray(legacy.body), true)
   assert.equal(legacy.body.length, 44)
+  assert.equal(legacy.body[0].supplier_cost, undefined)
+  assert.equal(legacy.body[0].internal_note, undefined)
   const first = await request('/products?page=1&limit=20', fixture)
   const second = await request('/products?page=2&limit=20', fixture)
   assert.deepEqual(first.body.pagination, { page: 1, limit: 20, total: 44,

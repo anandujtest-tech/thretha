@@ -230,7 +230,7 @@ test('an unsubscribed duplicate email suppresses delivery and cancellation stops
 test('Admin token helper denies guests and non-admins', () => {
   const source = fs.readFileSync(new URL('../app/api/[[...path]]/route.js', import.meta.url), 'utf8')
   const helpers = source.slice(source.indexOf('function getToken('), source.indexOf('const VISITOR_EVENT_NAMES'))
-  const context = vm.createContext({ jwt, JWT_SECRET: secret })
+  const context = vm.createContext({ jwt, getSigningSecret: () => secret })
   vm.runInContext(`${helpers}\nthis.check = requireAuth`, context)
   const request = (token) => ({ headers: { get: () => token ? `Bearer ${token}` : '' } })
   assert.equal(context.check(request('')), null)
@@ -274,7 +274,7 @@ test('real Admin campaign route branches enforce draft, audience, preview, confi
   const authHelpers = source.slice(source.indexOf('function getToken('), source.indexOf('const VISITOR_EVENT_NAMES'))
   const campaignHelper = source.slice(source.indexOf('function adminNewsletterCampaign('), source.indexOf('function reviewOrderOwnerFilter('))
   const branch = source.slice(source.indexOf('      // Newsletter campaigns use the existing Admin token'), source.indexOf("      if (route === '/admin/reviews'"))
-  const context = vm.createContext({ jwt, JWT_SECRET: secret, URL, process, uuidv4, countNewsletterAudience, ensureNewsletterCampaignIndexes, validateNewsletterDraft, renderNewsletterEmail, getAppBaseUrl: () => appUrl, json: (data, status = 200) => ({ status, data }) })
+  const context = vm.createContext({ jwt, getSigningSecret: () => secret, URL, process, uuidv4, countNewsletterAudience, ensureNewsletterCampaignIndexes, validateNewsletterDraft, renderNewsletterEmail, getAppBaseUrl: () => appUrl, json: (data, status = 200) => ({ status, data }) })
   vm.runInContext(`${authHelpers}\n${campaignHelper}\nasync function handle(request, database) { const route = new URL(request.url).pathname.replace(/^\\/api/, ''); const parts = route.split('/').filter(Boolean); const method = request.method; const auth = requireAuth(request); if (!auth) return json({ error: 'Unauthorized' }, 401); ${branch} return json({ error: 'Not found' }, 404) }; this.handle = handle`, context)
   const adminToken = jwt.sign({ id: 'admin-1', role: 'admin' }, secret)
   const customerToken = jwt.sign({ id: 'customer-1', role: 'customer' }, secret)

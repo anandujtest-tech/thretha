@@ -60,7 +60,7 @@ function routeHarness() {
   const end = source.indexOf("    if (route === '/admin/push/settings' && method === 'PUT')", start)
   assert.ok(start > 0 && end > start)
   const authHelpers = source.slice(source.indexOf('function getToken('), source.indexOf('const VISITOR_EVENT_NAMES'))
-  const context = vm.createContext({ URL, ObjectId, jwt, JWT_SECRET: secret, pushSubscriberPipeline, adminPushSubscriber, json: (body, status = 200) => ({ status, body }) })
+  const context = vm.createContext({ URL, ObjectId, jwt, getSigningSecret: () => secret, pushSubscriberPipeline, adminPushSubscriber, json: (body, status = 200) => ({ status, body }) })
   vm.runInContext(`${authHelpers}\nasync function handle(request, database) { const url = new URL(request.url); const route = url.pathname.replace(/^\\/api/, ''); const parts = route.split('/').filter(Boolean); const method = request.method; ${source.slice(start, end)} }; this.handle = handle`, context)
   return context.handle
 }
