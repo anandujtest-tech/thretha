@@ -118,6 +118,12 @@ import { countNewsletterAudience, ensureNewsletterCampaignIndexes } from '../../
 import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
 import { getProductEffectivePrice } from '../../../lib/productInventory.js'
 import { createMobileSession, getMobileBearerToken, revokeMobileSession } from '../../../lib/mobileSessions.js'
+import {
+  MobileGoogleAuthError, mobileGoogleConfig, startMobileGoogleAuth,
+  consumeMobileGoogleState, exchangeMobileGoogleCode,
+  findOrCreateMobileGoogleCustomer, createMobileGoogleHandoff,
+  consumeMobileGoogleHandoff,
+} from '../../../lib/googleMobileAuth.js'
 import { guestContactMatches, verifyCashfreePayment } from '../../../lib/cashfreeVerification.js'
 import { isValidHomeSectionOrderInput, isValidHomeSectionVisibilityInput, normalizeHomeSectionOrder, normalizeHomeSectionVisibility } from '../../../lib/homeLayout.js'
 import { DEFAULT_HOMEPAGE_CONTENT } from '../../../lib/homepageContent.js'
@@ -2887,6 +2893,58 @@ async function handleRoute(request, { params }) {
       })
 
       return res
+    }
+
+    // Native Google login uses its own callback and one-time, PKCE-bound app handoff.
+    // The website Google callback and cookie flow below remain independent.
+    if (route === '/auth/google/mobile/url' && method === 'GET') {
+      try {
+        const config = mobileGoogleConfig()
+        const query = new URL(request.url).searchParams
+        const result = await startMobileGoogleAuth(database, config,
+          query.get('redirect_uri'), query.get('handoff_challenge'))
+        return json(result, 200, { 'Cache-Control': 'no-store' })
+      } catch (error) {
+        if (error instanceof MobileGoogleAuthError) return json({ error: error.code }, error.status, { 'Cache-Control': 'no-store' })
+        return json({ error: 'mobile_google_unavailable' }, 503, { 'Cache-Control': 'no-store' })
+      }
+    }
+
+    if (route === '/auth/google/mobile/callback' && method === 'GET') {
+      try {
+        const config = mobileGoogleConfig()
+        const query = new URL(request.url).searchParams
+        // Consume state before code exchange or error handling so it cannot be replayed.
+        const stateRecord = await consumeMobileGoogleState(database, config, query.get('state'))
+        if (query.has('error')) return json({ error: 'google_authorization_failed' }, 400, { 'Cache-Control': 'no-store' })
+        const profile = await exchangeMobileGoogleCode(config, query.get('code'), stateRecord)
+        const customer = await findOrCreateMobileGoogleCustomer(database, profile)
+        const redirect = await createMobileGoogleHandoff(database, stateRecord, customer.id)
+        const response = NextResponse.redirect(redirect, 302)
+        response.headers.set('Cache-Control', 'no-store')
+        response.headers.set('Referrer-Policy', 'no-referrer')
+        return response
+      } catch (error) {
+        if (error instanceof MobileGoogleAuthError) return json({ error: error.code }, error.status, { 'Cache-Control': 'no-store' })
+        return json({ error: 'mobile_google_unavailable' }, 503, { 'Cache-Control': 'no-store' })
+      }
+    }
+
+    if (route === '/auth/google/mobile/exchange' && method === 'POST') {
+      try {
+        const config = mobileGoogleConfig()
+        const body = await request.json().catch(() => ({}))
+        const customerId = await consumeMobileGoogleHandoff(database, config, body.code, body.code_verifier)
+        const customer = await database.collection('users').findOne({ id: customerId })
+        if (!customer || (customer.status && customer.status !== 'ACTIVE')) {
+          return json({ error: 'account_unavailable' }, 403, { 'Cache-Control': 'no-store' })
+        }
+        const session = await createMobileSession(database, customer.id)
+        return json(mobileAuthenticationResponse(session, customer), 200, { 'Cache-Control': 'no-store' })
+      } catch (error) {
+        if (error instanceof MobileGoogleAuthError) return json({ error: error.code }, error.status, { 'Cache-Control': 'no-store' })
+        return json({ error: 'mobile_google_unavailable' }, 503, { 'Cache-Control': 'no-store' })
+      }
     }
 
     // 3. Google OAuth URL with PKCE
