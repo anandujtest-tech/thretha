@@ -1,4 +1,4 @@
-import { MongoClient } from 'mongodb'
+import { MongoClient, ObjectId } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server.js'
 import { revalidatePath } from 'next/cache'
@@ -106,6 +106,7 @@ import {
   normalizePushSubscription,
 } from '../../../lib/pushNotifications.js'
 import { ensurePushIndexes, processPushQueue, suppressDuePushCampaigns } from '../../../lib/pushScheduler.js'
+import { adminPushSubscriber, pushDeviceFromUserAgent, pushSubscriberPipeline } from '../../../lib/pushSubscribers.js'
 import { normalizeOccasions, DEFAULT_OCCASIONS } from '../../../lib/occasions.js'
 import { ensureProductReviewIndexes, normalizeReviewText, isCloudinaryImageUrl } from '../../../lib/productReviews.js'
 import { ensureBackInStockIndexes, isVariantAvailable, saveBackInStockSubscription, unsubscribeBackInStockSubscription, verifyBackInStockUnsubscribeToken, verifySignedBackInStockUnsubscribeToken } from '../../../lib/backInStock.js'
@@ -804,16 +805,27 @@ async function handleRoute(request, { params }) {
         if (!rate.allowed) return json({ error: 'Too many subscription attempts. Please try again later.' }, 429)
         const body = await request.json().catch(() => ({}))
         const subscription = normalizePushSubscription(body.subscription)
+        const customer = await getCustomerFromRequest(request, database)
+        const device = pushDeviceFromUserAgent(request.headers.get('user-agent'))
         const now = new Date()
         await ensurePushIndexes(database)
-        await database.collection('push_subscriptions').updateOne(
-          { endpoint: subscription.endpoint },
+        const subscriptions = database.collection('push_subscriptions')
+        const existing = await subscriptions.findOne({ endpoint: subscription.endpoint }, { projection: { removal_reason: 1 } })
+        if (existing?.removal_reason === 'admin' && body.reactivate !== true) {
+          return json({ error: 'This browser subscription was removed. Enable notifications again to resubscribe.' }, 409)
+        }
+        const saved = await subscriptions.updateOne(
+          existing && body.reactivate !== true
+            ? { endpoint: subscription.endpoint, removal_reason: { $ne: 'admin' } }
+            : { endpoint: subscription.endpoint },
           {
-            $set: { keys: subscription.keys, active: true, updated_at: now, last_failure: null },
+            $set: { keys: subscription.keys, active: true, customer_id: customer?.id || null, ...device, last_active_at: now, updated_at: now, last_failure: null },
             $setOnInsert: { created_at: now, last_success_at: null, success_count: 0, failure_count: 0 },
+            $unset: { removed_at: '', removal_reason: '', unsubscribed_at: '' },
           },
-          { upsert: true },
+          { upsert: !existing },
         )
+        if (existing && !saved.matchedCount) return json({ error: 'This browser subscription was removed. Enable notifications again to resubscribe.' }, 409)
         return json({ ok: true })
       } catch (error) {
         return json({ error: error.message || 'Unable to save this push subscription.' }, 400)
@@ -854,6 +866,38 @@ async function handleRoute(request, { params }) {
         sent_today: sentToday,
         campaigns,
       })
+    }
+    if (route === '/admin/push/subscribers' && method === 'GET') {
+      if (!requireAuth(request)) return json({ error: 'Unauthorized' }, 401)
+      const url = new URL(request.url)
+      const status = url.searchParams.get('status') || 'all'
+      const identity = url.searchParams.get('identity') || 'all'
+      if (!['all', 'active', 'removed'].includes(status) || !['all', 'identified', 'anonymous'].includes(identity)) {
+        return json({ error: 'Invalid subscriber filter.' }, 400)
+      }
+      const search = String(url.searchParams.get('search') || '').trim().slice(0, 120)
+      const rawPage = Number(url.searchParams.get('page') || 1)
+      const page = Number.isSafeInteger(rawPage) ? Math.max(1, rawPage) : 1
+      const limit = 20
+      const [result] = await database.collection('push_subscriptions').aggregate(
+        pushSubscriberPipeline({ page, limit, search, status, identity }),
+      ).toArray()
+      const total = result?.count?.[0]?.total || 0
+      return json({ subscribers: (result?.items || []).map(adminPushSubscriber), total, page, pages: Math.max(1, Math.ceil(total / limit)), limit })
+    }
+    if (parts[0] === 'admin' && parts[1] === 'push' && parts[2] === 'subscribers' && parts[3] && method === 'DELETE') {
+      if (!requireAuth(request)) return json({ error: 'Unauthorized' }, 401)
+      if (!/^[a-f\d]{24}$/i.test(parts[3])) return json({ error: 'Subscription not found.' }, 404)
+      const subscriptions = database.collection('push_subscriptions')
+      const id = new ObjectId(parts[3])
+      const now = new Date()
+      const removed = await subscriptions.updateOne({ _id: id, active: true }, {
+        $set: { active: false, removed_at: now, removal_reason: 'admin', updated_at: now },
+      })
+      if (removed.matchedCount) return json({ ok: true, alreadyRemoved: false })
+      const existing = await subscriptions.findOne({ _id: id }, { projection: { _id: 1 } })
+      if (!existing) return json({ error: 'Subscription not found.' }, 404)
+      return json({ ok: true, alreadyRemoved: true })
     }
     if (route === '/admin/push/settings' && method === 'PUT') {
       if (!requireAuth(request)) return json({ error: 'Unauthorized' }, 401)

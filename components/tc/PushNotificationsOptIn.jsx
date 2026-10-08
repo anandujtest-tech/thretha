@@ -67,11 +67,11 @@ export default function PushNotificationsOptIn({ notificationTargetRef, docked =
   const floatingOriginRef = useRef(null)
   const dockOffsetRef = useRef({ x: 0, y: 0 })
 
-  const syncSubscription = async (current) => {
+  const syncSubscription = async (current, { reactivate = false } = {}) => {
     const response = await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription: current.toJSON() }),
+      body: JSON.stringify({ subscription: current.toJSON(), ...(reactivate ? { reactivate: true } : {}) }),
     })
     if (!response.ok) {
       const result = await response.json().catch(() => ({}))
@@ -95,7 +95,7 @@ export default function PushNotificationsOptIn({ notificationTargetRef, docked =
       if (error?.name === 'InvalidStateError' || error?.name === 'AbortError') throw serviceWorkerUnavailableError()
       throw error
     }
-    await syncSubscription(current)
+    await syncSubscription(current, { reactivate: true })
     setSubscription(current)
     return current
   }

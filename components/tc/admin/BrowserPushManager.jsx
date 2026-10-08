@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Bell, Pause, Play, Pencil, RefreshCw, Send, XCircle } from 'lucide-react'
 import { api, auth } from '@/lib/tc'
 import CampaignImageUpload from './CampaignImageUpload'
+import PushSubscriberManager from './PushSubscriberManager'
 
 const WEEKDAYS = [
   ['Monday', 1], ['Tuesday', 2], ['Wednesday', 3], ['Thursday', 4],
@@ -205,6 +206,8 @@ export default function BrowserPushManager() {
         </div>
         <p className="mt-2 text-[11px] text-cocoa-light">Custom values must be whole minutes, up to 7 days. Choose Immediately for 0 minutes.</p>
       </div>
+
+      <PushSubscriberManager activeCount={data?.subscriber_count} onRemoved={load} />
 
       <form onSubmit={submit} className="mt-6 space-y-4 border-t border-ink/10 pt-5">
         <div className="flex items-center justify-between"><h3 className="text-xs font-semibold uppercase tracking-wider text-ink">{editing ? 'Edit campaign' : 'Create notification'}</h3>{editing && <button type="button" onClick={() => { setEditing(null); setForm(emptyForm()) }} className="text-xs underline">Stop editing</button>}</div>
