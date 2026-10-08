@@ -115,8 +115,7 @@ import { ensureAbandonedCartIndexes, createCartKey, getCartRecoveryItems, create
 import { ensureNewsletterIndexes, createNewsletterUnsubscribeToken, verifyNewsletterUnsubscribeToken, normalizeNewsletterEmail, isValidNewsletterEmail } from '../../../lib/newsletter.js'
 import { activeNewsletterAudienceFilter, validateNewsletterDraft, renderNewsletterEmail } from '../../../lib/newsletterCampaigns.js'
 import { countNewsletterAudience, ensureNewsletterCampaignIndexes } from '../../../lib/newsletterScheduler.js'
-import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
-import { getProductEffectivePrice } from '../../../lib/productInventory.js'
+import { handlePublicProducts } from '../../../lib/publicCatalog.js'
 import { createMobileSession, getMobileBearerToken, revokeMobileSession } from '../../../lib/mobileSessions.js'
 import {
   MobileGoogleAuthError, mobileGoogleConfig, startMobileGoogleAuth,
@@ -1778,49 +1777,8 @@ async function handleRoute(request, { params }) {
 
     // ===== PRODUCTS (public) =====
     if (route === '/products' && method === 'GET') {
-      const url = new URL(request.url)
-      const q = url.searchParams
-      const filter = { active: true }
-      if (q.get('slugs')) {
-        const slugs = [...new Set(q.get('slugs').split(',').map((value) => value.trim()).filter((value) => /^[a-z0-9-]{1,100}$/i.test(value)))].slice(0, 12)
-        if (!slugs.length) return json([])
-        filter.slug = { $in: slugs }
-      }
-      if (q.get('occasion')) {
-        const occasionSettings = await database.collection('settings').findOne({ id: 'global' }, { projection: { shop_by_occasion: 1 } })
-        if (occasionSettings?.shop_by_occasion?.enabled === false) return json([])
-        const occasion = normalizeOccasions(occasionSettings?.shop_by_occasion?.occasions ?? DEFAULT_OCCASIONS)
-          .find((item) => item.active && item.slug === q.get('occasion'))
-        if (!occasion) return json([])
-        filter.occasion_slugs = occasion.slug
-      }
-      if (q.get('category')) {
-        const cat = await database.collection('categories').findOne({ slug: q.get('category') })
-        if (cat) filter.category_id = cat.id
-        else return json([])
-      }
-      if (q.get('new') === 'true') filter.new_arrival = true
-      if (q.get('featured') === 'true') filter.featured = true
-      if (q.get('colour')) filter.colour = { $regex: q.get('colour'), $options: 'i' }
-      const search = normalizeSearchTerm(q.get('search'))
-      if (search) {
-        const rx = { $regex: escapeSearchTerm(search), $options: 'i' }
-        filter.$or = [{ name: rx }, { sku: rx }, { category_name: rx }, { colour: rx }]
-      }
-      const priceRange = parsePriceRange(q.get('minPrice'), q.get('maxPrice'))
-      if (!priceRange.valid) return json({ error: priceRange.error }, 400)
-      let list = await database.collection('products').find(filter).toArray()
-      list = filterProductsByPriceAndAvailability(list, {
-        priceRange,
-        availability: q.get('availability'),
-        size: q.get('size') || '',
-      })
-      const sort = q.get('sort')
-      if (sort === 'price_asc') list.sort((a, b) => getProductEffectivePrice(a) - getProductEffectivePrice(b))
-      else if (sort === 'price_desc') list.sort((a, b) => getProductEffectivePrice(b) - getProductEffectivePrice(a))
-      else if (sort === 'featured') list.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0))
-      else list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      return json(list.map(strip))
+      const result = await handlePublicProducts(request, database)
+      return json(result.body, result.status)
     }
 
     if ((parts[0] === 'products' || parts[0] === 'product') && parts.length === 2 && method === 'GET') {
