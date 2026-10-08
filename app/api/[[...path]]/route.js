@@ -11,10 +11,11 @@ import { serveMedia, cloudinaryEnabled } from '../../../lib/storage.js'
 import { sendLoginOtp } from '../../../lib/email.js'
 import {
   signCustomerToken,
+  mobileAuthenticationResponse,
   getCustomerFromRequest,
   generateOtp,
   hashOtp,
-  verifyOtpHash,
+  verifyAndConsumeEmailOtp,
   generatePKCE,
   generateOAuthState,
   verifyOAuthState,
@@ -116,6 +117,7 @@ import { activeNewsletterAudienceFilter, validateNewsletterDraft, renderNewslett
 import { countNewsletterAudience, ensureNewsletterCampaignIndexes } from '../../../lib/newsletterScheduler.js'
 import { normalizeSearchTerm, escapeSearchTerm, parsePriceRange, filterProductsByPriceAndAvailability } from '../../../lib/catalogFilters.js'
 import { getProductEffectivePrice } from '../../../lib/productInventory.js'
+import { createMobileSession, getMobileBearerToken, revokeMobileSession } from '../../../lib/mobileSessions.js'
 import { guestContactMatches, verifyCashfreePayment } from '../../../lib/cashfreeVerification.js'
 import { isValidHomeSectionOrderInput, isValidHomeSectionVisibilityInput, normalizeHomeSectionOrder, normalizeHomeSectionVisibility } from '../../../lib/homeLayout.js'
 import { DEFAULT_HOMEPAGE_CONTENT } from '../../../lib/homepageContent.js'
@@ -2795,57 +2797,17 @@ async function handleRoute(request, { params }) {
 
     // 2. Email OTP Verification & Login
     if (route === '/auth/email/verify-otp' && method === 'POST') {
-      const { email, otp } = await request.json().catch(() => ({}))
+      const { email, otp, client } = await request.json().catch(() => ({}))
       const cleanEmail = String(email || '').trim().toLowerCase()
       const cleanOtp = String(otp || '').trim()
       const clientIp = getClientIp(request)
 
-      if (!cleanEmail || !cleanOtp || cleanOtp.length !== 6) {
-        return json({ error: 'Please enter the 6-digit verification code sent to your email.' }, 400)
+      if (client !== undefined && client !== 'web' && client !== 'mobile') {
+        return json({ error: 'Unsupported authentication client.' }, 400)
       }
 
-      // Rate limit check on verification attempts (Per IP: 20 per 10 mins; Per Email: 10 per 10 mins)
-      const ipCheck = await checkRateLimit(database, `otp_verify_ip_${clientIp}`, 20, 10)
-      const emailCheck = await checkRateLimit(database, `otp_verify_email_${cleanEmail}`, 10, 10)
-      if (!ipCheck.allowed || !emailCheck.allowed) {
-        return json({ error: 'Too many incorrect attempts. Please request a new verification code.' }, 429)
-      }
-
-      const tokenRecord = await database.collection('verification_tokens').findOne({
-        identifier: cleanEmail,
-      })
-
-      if (!tokenRecord || new Date() > new Date(tokenRecord.expires_at)) {
-        if (tokenRecord) await database.collection('verification_tokens').deleteOne({ _id: tokenRecord._id })
-        return json({ error: 'Verification code has expired or is invalid. Please request a new code.' }, 400)
-      }
-
-      if (tokenRecord.attempts >= 5) {
-        await database.collection('verification_tokens').deleteOne({ _id: tokenRecord._id })
-        return json({ error: 'Too many incorrect attempts. Please request a new verification code.' }, 400)
-      }
-
-      const isValid = await verifyOtpHash(cleanOtp, tokenRecord.token_hash)
-      if (!isValid) {
-        await database.collection('verification_tokens').updateOne(
-          { _id: tokenRecord._id },
-          { $inc: { attempts: 1 } }
-        )
-        const remainingAttempts = 5 - (tokenRecord.attempts + 1)
-        return json({
-          error: `Incorrect verification code. ${Math.max(0, remainingAttempts)} attempt(s) remaining.`,
-        }, 400)
-      }
-
-      // Atomic single-use consumption: findOneAndDelete ensures that two concurrent requests
-      // cannot both successfully verify and consume the same token.
-      const consumed = await database.collection('verification_tokens').findOneAndDelete({
-        _id: tokenRecord._id,
-      })
-
-      if (!consumed || (!consumed.value && !consumed._id)) {
-        return json({ error: 'Verification code has already been consumed. Please request a new code.' }, 400)
-      }
+      const verification = await verifyAndConsumeEmailOtp(database, cleanEmail, cleanOtp, clientIp)
+      if (!verification.ok) return json({ error: verification.error }, verification.status)
 
       // Find or create customer user (Guarantees unified single user identity)
       let user = await database.collection('users').findOne({ email: cleanEmail })
@@ -2899,6 +2861,11 @@ async function handleRoute(request, { params }) {
         },
         { $set: { userId: user.id, updated_at: now } }
       )
+
+      if (client === 'mobile') {
+        const session = await createMobileSession(database, user.id)
+        return json(mobileAuthenticationResponse(session, user), 200, { 'Cache-Control': 'no-store' })
+      }
 
       // Sign session JWT
       const sessionToken = signCustomerToken(user)
@@ -3133,9 +3100,17 @@ async function handleRoute(request, { params }) {
     if ((route === '/auth/session' || route === '/account/me') && method === 'GET') {
       const customer = await getCustomerFromRequest(request, database)
       if (!customer) {
-        return json({ authenticated: false, user: null })
+        return json({ authenticated: false, user: null }, 200, { 'Cache-Control': 'no-store' })
       }
-      return json({ authenticated: true, user: customer })
+      return json({ authenticated: true, user: customer }, 200, { 'Cache-Control': 'no-store' })
+    }
+
+    if (route === '/auth/mobile/logout' && method === 'POST') {
+      const token = getMobileBearerToken(request)
+      if (!token || !await revokeMobileSession(database, token)) {
+        return json({ error: 'Invalid or expired mobile session.' }, 401, { 'Cache-Control': 'no-store' })
+      }
+      return json({ ok: true }, 200, { 'Cache-Control': 'no-store' })
     }
 
     // 6. Customer Logout
